@@ -71,7 +71,7 @@ const normalizeString = (str: string) => {
 
 const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const [connections, setConnections] = useState<Connection[]>(INITIAL_CONNECTIONS);
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'galaxy'>('galaxy');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'galaxy'>('list');
   const [filter, setFilter] = useState('');
   
   // Advanced Filters
@@ -213,10 +213,10 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
              />
            ))}
 
-           {/* The Sun (You) */}
+           {/* The Earth (You) */}
            <div className="absolute z-[100] group cursor-default">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-300 via-yellow-400 to-orange-400 shadow-[0_0_30px_rgba(250,204,21,0.5)] flex items-center justify-center border-4 border-white/30 relative">
-                 <Sun size={32} className="text-white fill-yellow-100" />
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 via-blue-600 to-emerald-400 shadow-[0_0_30px_rgba(37,99,235,0.6)] flex items-center justify-center border-4 border-white/30 relative">
+                 <Globe size={32} className="text-white" strokeWidth={1.5} />
               </div>
            </div>
 
@@ -354,24 +354,25 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
         <div className="flex gap-2">
            <div className="flex items-center bg-white border border-slate-200 rounded-lg p-1">
               <button 
-                 onClick={() => setViewMode('galaxy')}
-                 className={`p-2 rounded-md transition-all ${viewMode === 'galaxy' ? 'bg-slate-900 text-white shadow-glow' : 'text-slate-400 hover:text-slate-600'}`}
-                 title="Galaxy Heatmap"
+                 onClick={() => setViewMode('list')}
+                 className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-slate-900 text-white shadow-glow' : 'text-slate-400 hover:text-slate-600'}`}
               >
-                 <Activity size={18} />
+                 <ListIcon size={18} />
               </button>
               <div className="w-px h-6 bg-slate-200 mx-1"></div>
               <button 
                  onClick={() => setViewMode('grid')}
-                 className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-slate-900 text-white shadow-glow' : 'text-slate-400 hover:text-slate-600'}`}
               >
                  <GridIcon size={18} />
               </button>
+              <div className="w-px h-6 bg-slate-200 mx-1"></div>
               <button 
-                 onClick={() => setViewMode('list')}
-                 className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-slate-100 text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 onClick={() => setViewMode('galaxy')}
+                 className={`p-2 rounded-md transition-all ${viewMode === 'galaxy' ? 'bg-slate-900 text-white shadow-glow' : 'text-slate-400 hover:text-slate-600'}`}
+                 title="Galaxy View"
               >
-                 <ListIcon size={18} />
+                 <Globe size={18} />
               </button>
            </div>
         </div>
