@@ -1,0 +1,7 @@
+{
+  "name": "Ket Noi Moi Nguoi (Picked)",
+  "description": "Nền tảng lưu giữ và kết nối mối quan hệ con người theo cách riêng tư và bền vững.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
