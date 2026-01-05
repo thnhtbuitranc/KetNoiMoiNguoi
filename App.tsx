@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { Home, User, Settings, LogOut, Menu, X, Bell, Search, LayoutGrid, HeartHandshake, Shield, Sparkles, FolderOpen, Grid, List, Calendar as CalendarIcon } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
+import AuthPage from './pages/Auth';
 import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
 import Connections from './pages/Connections';
@@ -91,6 +92,7 @@ const Sidebar: React.FC<{
 const AppContent: React.FC = () => {
   const [lang, setLang] = useState<Language>(Language.VI);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const toggleLang = () => setLang(prev => prev === Language.VI ? Language.EN : Language.VI);
@@ -98,6 +100,7 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
       
+      {/* Application (Logged In) */}
       {isLoggedIn && (
         <div className="lg:pl-72 flex flex-col min-h-screen transition-all duration-300">
            {/* Mobile Header */}
@@ -113,7 +116,7 @@ const AppContent: React.FC = () => {
               </button>
            </header>
            
-           {/* Desktop Top Bar (Hidden on mobile, usually integrated into page content in this design) */}
+           {/* Desktop Top Bar */}
            <div className="hidden lg:flex justify-end items-center p-6 gap-4">
                <div className="flex items-center bg-white border border-slate-200 rounded-full px-4 py-2 w-80 shadow-sm">
                   <Search size={16} className="text-slate-400 mr-2" />
@@ -146,18 +149,32 @@ const AppContent: React.FC = () => {
         </div>
       )}
 
+      {/* Sidebar (Logged In) */}
       {isLoggedIn && (
         <Sidebar 
           isOpen={sidebarOpen} 
           onClose={() => setSidebarOpen(false)} 
           lang={lang} 
-          onLogout={() => setIsLoggedIn(false)} 
+          onLogout={() => { setIsLoggedIn(false); setShowAuth(false); }} 
         />
       )}
 
+      {/* Auth Flow (Logged Out) */}
       {!isLoggedIn && (
          <Routes>
-            <Route path="/" element={<LandingPage onGetStarted={() => setIsLoggedIn(true)} lang={lang} />} />
+            <Route path="/" element={
+               showAuth ? (
+                  <AuthPage 
+                     onLogin={() => setIsLoggedIn(true)} 
+                     onBack={() => setShowAuth(false)} 
+                  />
+               ) : (
+                  <LandingPage 
+                     onGetStarted={() => setShowAuth(true)} 
+                     lang={lang} 
+                  />
+               )
+            } />
             <Route path="*" element={<Navigate to="/" replace />} />
          </Routes>
       )}
