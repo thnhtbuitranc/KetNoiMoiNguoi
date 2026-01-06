@@ -3,9 +3,32 @@ import { RelationshipTier } from "../types";
 
 // Helper to get the AI client
 const getAIClient = () => {
-  const apiKey = process.env.API_KEY;
+  // Fix for "process is not defined" error
+  // Try to get key from Vite environment first, then fallback to process.env safely
+  let apiKey = '';
+  
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      apiKey = import.meta.env.VITE_API_KEY || import.meta.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore error
+  }
+
   if (!apiKey) {
-    console.error("API_KEY is missing in environment variables.");
+    try {
+      if (typeof process !== 'undefined' && process.env) {
+        apiKey = process.env.API_KEY || '';
+      }
+    } catch (e) {
+      // Ignore error
+    }
+  }
+
+  if (!apiKey) {
+    console.error("API_KEY is missing in environment variables. Please set VITE_API_KEY or API_KEY.");
     throw new Error("API Key is required for Gemini services.");
   }
   return new GoogleGenAI({ apiKey });
