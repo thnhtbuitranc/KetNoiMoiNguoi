@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2 } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -52,6 +52,16 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  
+  // --- MEMORY MODAL STATE ---
+  const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [selectedConnectionForMemory, setSelectedConnectionForMemory] = useState<Connection | null>(null);
+  const [memoryForm, setMemoryForm] = useState({
+      title: '',
+      content: '',
+      date: new Date().toISOString().split('T')[0],
+      type: 'NOTE'
+  });
 
   // Form State
   const [newConnection, setNewConnection] = useState<Partial<Connection> & { tagsString: string }>({
@@ -174,6 +184,65 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
        logDbOperation('Connections', 'Update Failed', null, err);
        alert("Lỗi cập nhật: " + err.message);
     }
+  };
+
+  // --- 4. MEMORY LOGIC ---
+  const openMemoryModal = (conn: Connection) => {
+     setSelectedConnectionForMemory(conn);
+     setMemoryForm({
+        title: '',
+        content: '',
+        date: new Date().toISOString().split('T')[0],
+        type: 'NOTE'
+     });
+     setIsMemoryModalOpen(true);
+  };
+
+  const handleSubmitMemory = async () => {
+     if (!selectedConnectionForMemory || !memoryForm.title) return;
+
+     try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("No authenticated user");
+
+        // 1. Insert into 'memories' table
+        logDbOperation('Memory', 'Creating Memory...', memoryForm);
+        const { data: memoryData, error: memError } = await supabase
+           .from('memories')
+           .insert({
+              user_id: user.id,
+              title: memoryForm.title,
+              content: memoryForm.content,
+              happened_at: memoryForm.date,
+              type: memoryForm.type
+           })
+           .select()
+           .single();
+
+        if (memError) throw memError;
+
+        // 2. Insert into 'connection_memories' junction table
+        logDbOperation('Memory', 'Linking to Connection...', { memory_id: memoryData.id, connection_id: selectedConnectionForMemory.id });
+        const { error: linkError } = await supabase
+           .from('connection_memories')
+           .insert({
+              memory_id: memoryData.id,
+              connection_id: selectedConnectionForMemory.id
+           });
+
+        if (linkError) throw linkError;
+
+        logDbOperation('Memory', 'Success');
+        alert("Đã thêm kỷ niệm thành công!");
+        setIsMemoryModalOpen(false);
+        // Optionally update the connection's interaction date
+        await supabase.from('connections').update({ last_interaction_date: memoryForm.date }).eq('id', selectedConnectionForMemory.id);
+        fetchConnections();
+
+     } catch (err: any) {
+        logDbOperation('Memory', 'Failed', null, err);
+        alert("Lỗi thêm kỷ niệm: " + err.message);
+     }
   };
 
   const clearFilters = () => {
@@ -569,6 +638,13 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                         <span className="text-[10px] text-slate-400 uppercase font-medium">Last Seen</span>
                      </div>
                   </div>
+                   {/* Add Memory Button in Grid */}
+                   <button 
+                     onClick={() => openMemoryModal(conn)}
+                     className="mt-3 w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
+                  >
+                     <Camera size={14} /> Thêm Kỷ Niệm
+                  </button>
                </Card>
             ))}
             {filteredConnections.length === 0 && (
@@ -647,12 +723,21 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                               </div>
                            </td>
                            <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={() => startEdit(conn)}
-                                className="text-slate-400 hover:text-primary-600 font-medium text-xs transition-colors flex items-center justify-end gap-1 ml-auto"
-                              >
-                                 <Edit2 size={14} /> Chỉnh sửa
-                              </button>
+                              <div className="flex justify-end items-center gap-3">
+                                 <button 
+                                    onClick={() => openMemoryModal(conn)}
+                                    className="text-slate-400 hover:text-green-600 font-medium text-xs transition-colors flex items-center gap-1"
+                                    title="Thêm Kỷ Niệm"
+                                 >
+                                    <Camera size={14} /> Kỷ niệm
+                                 </button>
+                                 <button 
+                                    onClick={() => startEdit(conn)}
+                                    className="text-slate-400 hover:text-primary-600 font-medium text-xs transition-colors flex items-center gap-1"
+                                 >
+                                    <Edit2 size={14} /> Sửa
+                                 </button>
+                              </div>
                            </td>
                         </tr>
                      )) : (
@@ -823,6 +908,65 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* NEW: Add Memory Modal */}
+      <Modal isOpen={isMemoryModalOpen} onClose={() => setIsMemoryModalOpen(false)} title="Lưu Kỷ Niệm Mới">
+        <div className="space-y-4">
+           {selectedConnectionForMemory && (
+              <div className="bg-slate-50 p-3 rounded-lg flex items-center gap-3 mb-2">
+                 <img src={selectedConnectionForMemory.avatar} className="w-8 h-8 rounded-full" />
+                 <span className="text-sm font-bold text-slate-700">Với: {selectedConnectionForMemory.name}</span>
+              </div>
+           )}
+
+           <div>
+              <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Tiêu đề kỷ niệm</label>
+              <Input 
+                 value={memoryForm.title} 
+                 onChange={(e) => setMemoryForm({...memoryForm, title: e.target.value})}
+                 placeholder="Ví dụ: Đi cà phê cuối tuần..." 
+              />
+           </div>
+
+           <div>
+              <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Nội dung chi tiết</label>
+              <textarea 
+                 value={memoryForm.content}
+                 onChange={(e) => setMemoryForm({...memoryForm, content: e.target.value})}
+                 className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus:border-primary-500 h-24"
+                 placeholder="Ghi lại những điều đáng nhớ..."
+              />
+           </div>
+
+           <div className="grid grid-cols-2 gap-4">
+              <div>
+                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Ngày xảy ra</label>
+                 <Input 
+                    type="date"
+                    value={memoryForm.date} 
+                    onChange={(e) => setMemoryForm({...memoryForm, date: e.target.value})}
+                 />
+              </div>
+              <div>
+                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Loại</label>
+                 <select 
+                    value={memoryForm.type}
+                    onChange={(e) => setMemoryForm({...memoryForm, type: e.target.value})}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus:border-primary-500"
+                 >
+                    <option value="NOTE">Ghi chú</option>
+                    <option value="PHOTO">Hình ảnh</option>
+                    <option value="VIDEO">Video</option>
+                    <option value="VOICE">Ghi âm</option>
+                 </select>
+              </div>
+           </div>
+
+           <div className="pt-4">
+              <Button fullWidth onClick={handleSubmitMemory}>Lưu Kỷ Niệm</Button>
+           </div>
+        </div>
       </Modal>
 
     </div>
