@@ -30,8 +30,8 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     role: "Member",
     location: "",
     avatar: "https://ui-avatars.com/api/?background=random",
-    cover: "bg-gradient-to-r from-slate-200 to-slate-300",
-    coverIsImage: false, // Track if cover is image or class string
+    cover: "",
+    coverIsImage: false, 
     email: { value: "", privacy: 'PRIVATE' } as UserField,
     address: { value: "", privacy: 'CLOSE_FRIENDS' } as UserField,
     job: { value: "", privacy: 'PUBLIC' } as UserField,
@@ -51,20 +51,33 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
             if (user) {
                 const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
                 
-                // Construct initial name if data is missing or incomplete
+                // Determine Name and Avatar Fallbacks
                 const initialName = data?.name || data?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || "User";
                 const initialAvatar = data?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(initialName)}&background=random`;
 
                 if (data) {
                     logDbOperation('Profile', 'Loaded', data);
+                    
+                    // Parse Privacy Settings
+                    const ps = data.privacy_settings || {};
+                    
                     setUserInfo(prev => ({
                         ...prev,
                         name: initialName,
-                        email: { ...prev.email, value: user.email || "" }, // Email from Auth User
+                        email: { value: user.email || "", privacy: ps.email || 'PRIVATE' },
                         avatar: initialAvatar,
                         bio: data.bio || '',
                         location: data.location || '',
-                        role: data.role || 'User',
+                        role: data.role || 'Member',
+                        cover: data.cover_url || "bg-gradient-to-r from-slate-200 to-slate-300",
+                        coverIsImage: !!data.cover_url && !data.cover_url.startsWith('bg-'),
+                        
+                        job: { value: data.job || '', privacy: ps.job || 'PUBLIC' },
+                        education: { value: data.education || '', privacy: ps.education || 'FRIENDS' },
+                        skills: { value: data.skills || '', privacy: ps.skills || 'PUBLIC' },
+                        hobbies: { value: data.hobbies || '', privacy: ps.hobbies || 'FRIENDS' },
+                        address: { value: data.location || '', privacy: ps.address || 'CLOSE_FRIENDS' }, // Mapping address to location field for now
+                        tags: data.tags && data.tags.length > 0 ? data.tags : ['MEMBER']
                     }));
                 } else {
                     // Initialize from Auth if no profile exists yet
@@ -93,10 +106,32 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
           
           logDbOperation('Profile', 'Updating...', userInfo);
           
+          // Construct Privacy Settings JSON
+          const privacySettings = {
+              email: userInfo.email.privacy,
+              address: userInfo.address.privacy,
+              job: userInfo.job.privacy,
+              education: userInfo.education.privacy,
+              skills: userInfo.skills.privacy,
+              hobbies: userInfo.hobbies.privacy
+          };
+
           const updates = {
-              name: userInfo.name, // Correct column is 'name'
+              name: userInfo.name,
               bio: userInfo.bio,
               location: userInfo.location,
+              role: userInfo.role,
+              // Only save cover if it's a URL (image), otherwise let it be null or handle CSS classes if DB supported
+              cover_url: userInfo.coverIsImage ? userInfo.cover : null,
+              
+              // New Fields
+              job: userInfo.job.value,
+              education: userInfo.education.value,
+              skills: userInfo.skills.value,
+              hobbies: userInfo.hobbies.value,
+              tags: userInfo.tags,
+              privacy_settings: privacySettings,
+              
               updated_at: new Date().toISOString()
           };
           
@@ -132,21 +167,44 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     coverInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'cover') => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'cover') => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (reader.result) {
-          setUserInfo(prev => ({
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if(!user) return;
+
+        // Upload to Storage
+        const fileExt = file.name.split('.').pop();
+        const filePath = `${user.id}/${type}_${Date.now()}.${fileExt}`;
+        
+        logDbOperation('Profile', `Uploading ${type}...`);
+        
+        const { error: uploadError } = await supabase.storage
+            .from('avatars') // Using 'avatars' bucket for profile images
+            .upload(filePath, file);
+            
+        if(uploadError) throw uploadError;
+
+        // Get Public URL
+        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+
+        // Update Local State
+        setUserInfo(prev => ({
             ...prev,
-            [type]: reader.result as string,
+            [type]: publicUrl,
             ...(type === 'cover' ? { coverIsImage: true } : {})
-          }));
-        }
-      };
-      reader.readAsDataURL(file);
-      // Reset input value to allow selecting the same file again
+        }));
+
+        // Immediate DB Update for Avatar/Cover
+        const updateField = type === 'avatar' ? 'avatar_url' : 'cover_url';
+        await supabase.from('profiles').update({ [updateField]: publicUrl }).eq('id', user.id);
+
+      } catch (err: any) {
+         alert("Upload failed: " + err.message);
+      }
+      
+      // Reset input
       e.target.value = '';
     }
   };
@@ -164,8 +222,8 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
   const getPrivacyLabel = (level: PrivacyLevel) => {
     switch (level) {
       case 'PUBLIC': return 'Public';
-      case 'FRIENDS': return 'Friends (Tier 1+)';
-      case 'CLOSE_FRIENDS': return 'Close Friends (Tier 3+)';
+      case 'FRIENDS': return 'Friends';
+      case 'CLOSE_FRIENDS': return 'Close Friends';
       case 'PRIVATE': return 'Only Me';
       default: return '';
     }
@@ -223,8 +281,27 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                </div>
                
                {/* Info */}
-               <h1 className="text-3xl font-bold text-slate-900 mb-1">{userInfo.name}</h1>
-               <p className="text-slate-500 font-medium mb-6">{userInfo.role} • {userInfo.location || 'Unknown Location'}</p>
+               {isEditing ? (
+                  <div className="max-w-xs mx-auto mb-4 space-y-2">
+                     <Input 
+                        value={userInfo.name} 
+                        onChange={(e) => setUserInfo({...userInfo, name: e.target.value})} 
+                        className="text-center font-bold text-lg"
+                        placeholder="Your Name"
+                     />
+                     <Input 
+                        value={userInfo.role} 
+                        onChange={(e) => setUserInfo({...userInfo, role: e.target.value})} 
+                        className="text-center text-sm"
+                        placeholder="Role / Title"
+                     />
+                  </div>
+               ) : (
+                  <>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-1">{userInfo.name}</h1>
+                    <p className="text-slate-500 font-medium mb-6">{userInfo.role} • {userInfo.location || 'Unknown Location'}</p>
+                  </>
+               )}
                
                {/* Stats */}
                <div className="flex justify-center gap-12 border-t border-b border-slate-100 py-6 mb-8">
@@ -291,16 +368,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                      <div className="flex items-center justify-between group">
                         <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
                            <Mail size={18} className="text-slate-400 shrink-0" />
-                           {isEditing ? (
-                             <Input 
-                               value={userInfo.email.value} 
-                               onChange={(e) => handleValueChange('email', e.target.value)} 
-                               className="py-1.5"
-                               disabled // Email changes usually require auth flow
-                             />
-                           ) : (
-                             <span className="truncate">{userInfo.email.value}</span>
-                           )}
+                           <span className="truncate">{userInfo.email.value}</span>
                         </div>
                         {isEditing ? (
                            <select 
@@ -321,13 +389,13 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                         )}
                      </div>
 
-                     {/* Address */}
+                     {/* Address / Location */}
                      <div className="flex items-center justify-between group">
                         <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
                            <MapPin size={18} className="text-slate-400 shrink-0" />
                            {isEditing ? (
                              <Input 
-                               value={userInfo.location} // Map location here
+                               value={userInfo.location} // This maps to both display location and address
                                onChange={(e) => setUserInfo({...userInfo, location: e.target.value})} 
                                className="py-1.5"
                                placeholder="City, Country"
@@ -370,6 +438,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                value={userInfo.job.value} 
                                onChange={(e) => handleValueChange('job', e.target.value)} 
                                className="py-1.5"
+                               placeholder="Software Engineer at Company X"
                              />
                            ) : (
                              <span className="truncate">{userInfo.job.value || 'Not set'}</span>
@@ -402,6 +471,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                value={userInfo.education.value} 
                                onChange={(e) => handleValueChange('education', e.target.value)} 
                                className="py-1.5"
+                               placeholder="University of Life"
                              />
                            ) : (
                              <span className="truncate">{userInfo.education.value || 'Not set'}</span>
@@ -440,6 +510,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                value={userInfo.skills.value} 
                                onChange={(e) => handleValueChange('skills', e.target.value)} 
                                className="py-1.5"
+                               placeholder="React, Design, Writing..."
                              />
                            ) : (
                              <span className="truncate">Skills: {userInfo.skills.value || 'None'}</span>
@@ -472,6 +543,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                value={userInfo.hobbies.value} 
                                onChange={(e) => handleValueChange('hobbies', e.target.value)} 
                                className="py-1.5"
+                               placeholder="Reading, Hiking, Gaming..."
                              />
                            ) : (
                              <span className="truncate">Hobbies: {userInfo.hobbies.value || 'None'}</span>

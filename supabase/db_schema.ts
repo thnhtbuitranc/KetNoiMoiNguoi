@@ -1,54 +1,180 @@
+
 export const DbSchema = `
 -- ==============================================================================
 -- SUPABASE DATABASE SCHEMA - KET NOI MOI NGUOI
--- ==============================================================================
--- INSTRUCTIONS:
--- 1. Go to Supabase Dashboard -> SQL Editor.
--- 2. Copy the content of this string (excluding the JS wrapper).
--- 3. Paste into the SQL Editor and click RUN.
 -- ==============================================================================
 
 -- 1. ENABLE EXTENSIONS
 create extension if not exists "uuid-ossp";
 
--- 2. PROFILES TABLE (Syncs with Auth)
+-- 2. PROFILES TABLE
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade not null primary key,
   email text,
-  full_name text,
+  name text, 
+  full_name text, 
   avatar_url text,
-  bio text,
-  role text default 'User',
-  location text,
-  qr_code text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable RLS for Profiles
+-- Idempotent Column Additions
+do $$ 
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'cover_url') then
+    alter table public.profiles add column cover_url text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'bio') then
+    alter table public.profiles add column bio text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'role') then
+    alter table public.profiles add column role text default 'User';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'location') then
+    alter table public.profiles add column location text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'job') then
+    alter table public.profiles add column job text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'education') then
+    alter table public.profiles add column education text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'skills') then
+    alter table public.profiles add column skills text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'hobbies') then
+    alter table public.profiles add column hobbies text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'tags') then
+    alter table public.profiles add column tags text[];
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'privacy_settings') then
+    alter table public.profiles add column privacy_settings jsonb default '{}'::jsonb;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'qr_code') then
+    alter table public.profiles add column qr_code text;
+  end if;
+end $$;
+
+-- Enable RLS
 alter table public.profiles enable row level security;
 
--- Profiles Policies
-create policy "Public profiles are viewable by everyone" 
-  on profiles for select using (true);
+-- STRICT POLICIES: Only Owner can Select/Update/Insert raw table
+drop policy if exists "Public profiles are viewable by everyone" on profiles;
+-- New Policy: Only allow users to view THEIR OWN profile directly
+create policy "Users can view own profile" 
+  on profiles for select using (auth.uid() = id);
 
+drop policy if exists "Users can insert their own profile" on profiles;
 create policy "Users can insert their own profile" 
   on profiles for insert with check (auth.uid() = id);
 
+drop policy if exists "Users can update their own profile" on profiles;
 create policy "Users can update their own profile" 
   on profiles for update using (auth.uid() = id);
 
--- Trigger to create profile on Signup
+
+-- SECURE VIEW FUNCTION
+-- This function allows others to view a profile but masks data based on privacy_settings
+create or replace function public.get_profile_view(target_id uuid)
+returns jsonb
+language plpgsql
+security definer -- Runs with admin privileges to bypass RLS
+set search_path = public
+as $$
+declare
+  viewer_id uuid = auth.uid();
+  target_profile profiles;
+  privacy_settings jsonb;
+  result jsonb;
+  setting text;
+begin
+  -- 1. Fetch Target Profile
+  select * into target_profile from profiles where id = target_id;
+  
+  if not found then
+    return null;
+  end if;
+
+  -- 2. If Viewer is Owner, return everything
+  if viewer_id = target_id then
+    return to_jsonb(target_profile);
+  end if;
+
+  privacy_settings := coalesce(target_profile.privacy_settings, '{}'::jsonb);
+
+  -- 3. Construct Public Base Object (Always Visible)
+  result := jsonb_build_object(
+    'id', target_profile.id,
+    'name', target_profile.name,
+    'avatar_url', target_profile.avatar_url,
+    'role', target_profile.role,
+    'bio', target_profile.bio -- Bio assumed public
+  );
+
+  -- 4. Conditionally Add Fields based on Settings
+  
+  -- Logic: If 'PUBLIC', show. 
+  -- If 'FRIENDS' or 'CLOSE_FRIENDS', currently treated as PRIVATE (hidden) 
+  -- because we don't have a bidirectional friend graph yet.
+
+  -- Email
+  setting := coalesce(privacy_settings->>'email', 'PRIVATE');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('email', target_profile.email);
+  end if;
+
+  -- Job
+  setting := coalesce(privacy_settings->>'job', 'PUBLIC');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('job', target_profile.job);
+  end if;
+
+  -- Education
+  setting := coalesce(privacy_settings->>'education', 'FRIENDS');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('education', target_profile.education);
+  end if;
+
+  -- Skills
+  setting := coalesce(privacy_settings->>'skills', 'PUBLIC');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('skills', target_profile.skills);
+  end if;
+
+  -- Hobbies
+  setting := coalesce(privacy_settings->>'hobbies', 'FRIENDS');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('hobbies', target_profile.hobbies);
+  end if;
+
+  -- Location (Mapped from 'address' setting)
+  setting := coalesce(privacy_settings->>'address', 'CLOSE_FRIENDS');
+  if setting = 'PUBLIC' then
+    result := result || jsonb_build_object('location', target_profile.location);
+  end if;
+
+  return result;
+end;
+$$;
+
+
+-- TRIGGER FOR NEW USER
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, full_name, avatar_url)
-  values (new.id, new.email, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
+  insert into public.profiles (id, email, name, avatar_url)
+  values (
+    new.id, 
+    new.email, 
+    COALESCE(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', 'New User'), 
+    new.raw_user_meta_data->>'avatar_url'
+  )
+  on conflict (id) do nothing;
   return new;
 end;
 $$ language plpgsql security definer;
 
--- Trigger execution
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
@@ -67,16 +193,15 @@ create table if not exists public.connections (
   tags text[],
   phone text,
   location text,
-  birthday text, -- Format: DD/MM or YYYY-MM-DD
+  birthday text,
   last_interaction_date date default CURRENT_DATE,
-  source text default 'MANUAL', -- 'APP', 'MANUAL'
+  source text default 'MANUAL',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable RLS for Connections
 alter table public.connections enable row level security;
 
--- Connections Policies
+drop policy if exists "Users can CRUD their own connections" on connections;
 create policy "Users can CRUD their own connections" 
   on connections for all using (auth.uid() = user_id);
 
@@ -90,30 +215,28 @@ create table if not exists public.memories (
   happened_at date default CURRENT_DATE,
   type text not null check (type in ('PHOTO', 'VIDEO', 'NOTE', 'VOICE')),
   media_url text,
-  sentiment_label text, -- AI Generated
+  sentiment_label text,
   sentiment_score float,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable RLS for Memories
 alter table public.memories enable row level security;
 
--- Memories Policies
+drop policy if exists "Users can CRUD their own memories" on memories;
 create policy "Users can CRUD their own memories" 
   on memories for all using (auth.uid() = user_id);
 
 
--- 5. CONNECTION_MEMORIES (Junction Table for Linking Memories to People)
+-- 5. CONNECTION_MEMORIES
 create table if not exists public.connection_memories (
   memory_id uuid references public.memories(id) on delete cascade,
   connection_id uuid references public.connections(id) on delete cascade,
   primary key (memory_id, connection_id)
 );
 
--- Enable RLS for Junction
 alter table public.connection_memories enable row level security;
 
--- Junction Policies
+drop policy if exists "Users can CRUD their own memory links" on connection_memories;
 create policy "Users can CRUD their own memory links" 
   on connection_memories for all using (
     exists (select 1 from memories where id = connection_memories.memory_id and user_id = auth.uid())
@@ -127,27 +250,26 @@ create table if not exists public.events (
   connection_id uuid references public.connections(id) on delete set null,
   title text not null,
   event_date date not null,
-  type text not null, -- 'BIRTHDAY', 'ANNIVERSARY', 'MEMORIAL', 'OTHER'
+  type text not null,
   is_favorite boolean default false,
   recurrence text default 'YEARLY', 
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable RLS for Events
 alter table public.events enable row level security;
 
--- Events Policies
+drop policy if exists "Users can CRUD their own events" on events;
 create policy "Users can CRUD their own events" 
   on events for all using (auth.uid() = user_id);
 
 
--- 7. VAULT_ITEMS TABLE (For File Storage Metadata)
+-- 7. VAULT_ITEMS TABLE
 create table if not exists public.vault_items (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
   parent_id uuid references public.vault_items(id) on delete cascade,
   name text not null,
-  type text not null, -- 'FOLDER', 'IMAGE', 'DOC', 'AUDIO'
+  type text not null,
   size text,
   storage_path text,
   is_encrypted boolean default false,
@@ -155,16 +277,14 @@ create table if not exists public.vault_items (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Enable RLS for Vault
 alter table public.vault_items enable row level security;
 
--- Vault Policies
+drop policy if exists "Users can CRUD their own vault items" on vault_items;
 create policy "Users can CRUD their own vault items" 
   on vault_items for all using (auth.uid() = user_id);
 
 
--- 8. STORAGE BUCKETS SETUP
--- Insert standard buckets if not exists
+-- 8. STORAGE POLICIES
 insert into storage.buckets (id, name, public) 
 values ('avatars', 'avatars', true) 
 on conflict (id) do nothing;
@@ -173,17 +293,17 @@ insert into storage.buckets (id, name, public)
 values ('vault_files', 'vault_files', false) 
 on conflict (id) do nothing;
 
--- Storage Policies
--- Avatars: Public Read, Authenticated Upload
+drop policy if exists "Avatar Public Read" on storage.objects;
 create policy "Avatar Public Read" 
   on storage.objects for select using (bucket_id = 'avatars');
 
+drop policy if exists "Avatar Auth Upload" on storage.objects;
 create policy "Avatar Auth Upload" 
   on storage.objects for insert with check (
     bucket_id = 'avatars' and auth.role() = 'authenticated'
   );
 
--- Vault: Private Read/Write
+drop policy if exists "Vault Private Access" on storage.objects;
 create policy "Vault Private Access" 
   on storage.objects for all using (
     bucket_id = 'vault_files' and auth.uid() = owner
