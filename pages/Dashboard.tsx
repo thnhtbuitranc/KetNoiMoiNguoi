@@ -1,35 +1,82 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Button, Badge } from '../components/ui';
 import { Sparkles, Calendar, Clock, Activity, Shield, ChevronRight, Heart, Cake, Flame, Filter, Image as ImageIcon, Music, MapPin } from 'lucide-react';
 import { Language } from '../types';
-import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface DashboardProps {
   lang: Language;
 }
 
-// Mock Data for Charts
-const HEALTH_DATA = [
-  { name: 'Tri kỷ', value: 15, color: '#6366f1' }, // Indigo
-  { name: 'Gia đình', value: 25, color: '#3b82f6' }, // Blue
-  { name: 'Bạn thân', value: 30, color: '#10b981' }, // Emerald
-  { name: 'Xã giao', value: 30, color: '#94a3b8' }, // Slate
-];
-
-// Mock Upcoming Events
-const UPCOMING_EVENTS = [
-  { id: '1', title: 'Sinh nhật Mẹ', date: '2023-10-22', displayDate: '22/10', type: 'BIRTHDAY', daysLeft: 2, isFavorite: true },
-  { id: '2', title: 'Kỷ niệm ngày cưới', date: '2023-10-25', displayDate: '25/10', type: 'ANNIVERSARY', daysLeft: 5, isFavorite: false },
-  { id: '3', title: 'Giỗ Ông Nội', date: '2023-11-02', displayDate: '02/11', type: 'MEMORIAL', daysLeft: 13, isFavorite: false },
-  { id: '4', title: 'Sinh nhật Sếp', date: '2023-11-10', displayDate: '10/11', type: 'BIRTHDAY', daysLeft: 21, isFavorite: false },
-];
-
 const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const [eventFilter, setEventFilter] = useState<'7D' | '1M' | '3M'>('7D');
-  const [events, setEvents] = useState(UPCOMING_EVENTS);
+  const [events, setEvents] = useState<any[]>([]);
+  const [stats, setStats] = useState<any[]>([]);
+  const [totalConnections, setTotalConnections] = useState(0);
 
-  const toggleFavorite = (id: string) => {
-     setEvents(prev => prev.map(e => e.id === id ? { ...e, isFavorite: !e.isFavorite } : e));
+  // Fetch Dashboard Data
+  useEffect(() => {
+     const fetchData = async () => {
+        logDbOperation('Dashboard', 'Fetching stats & events...');
+        
+        // 1. Fetch Stats (Tier Distribution)
+        const { data: connData, error: connError } = await supabase.from('connections').select('tier');
+        if (!connError && connData) {
+            setTotalConnections(connData.length);
+            const tiers = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+            connData.forEach((c: any) => {
+               if (tiers[c.tier as keyof typeof tiers] !== undefined) tiers[c.tier as keyof typeof tiers]++;
+            });
+            
+            const chartData = [
+               { name: 'Tri kỷ', value: tiers[5], color: '#6366f1' }, // Indigo
+               { name: 'Gia đình', value: tiers[4], color: '#3b82f6' }, // Blue
+               { name: 'Bạn thân', value: tiers[3], color: '#10b981' }, // Emerald
+               { name: 'Xã giao', value: tiers[2] + tiers[1], color: '#94a3b8' }, // Slate
+            ].filter(d => d.value > 0);
+            
+            setStats(chartData);
+        }
+
+        // 2. Fetch Events
+        const { data: eventData, error: eventError } = await supabase
+            .from('events')
+            .select('*')
+            .order('event_date', { ascending: true })
+            .limit(10);
+            
+        if (!eventError && eventData) {
+            logDbOperation('Dashboard', 'Events received', eventData);
+            
+            const today = new Date();
+            const formattedEvents = eventData.map((e: any) => {
+               const eDate = new Date(e.event_date);
+               const diffTime = eDate.getTime() - today.getTime();
+               const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+               
+               return {
+                  id: e.id,
+                  title: e.title,
+                  date: e.event_date,
+                  displayDate: `${eDate.getDate()}/${eDate.getMonth() + 1}`,
+                  type: e.type,
+                  daysLeft: daysLeft,
+                  isFavorite: e.is_favorite
+               };
+            }).filter((e: any) => e.daysLeft >= 0); // Only future events
+
+            setEvents(formattedEvents);
+        }
+     };
+
+     fetchData();
+  }, []);
+
+  const toggleFavorite = async (id: string, currentVal: boolean) => {
+     // Optimistic update
+     setEvents(prev => prev.map(e => e.id === id ? { ...e, isFavorite: !currentVal } : e));
+     await supabase.from('events').update({ is_favorite: !currentVal }).eq('id', id);
   };
 
   const filteredEvents = events.filter(e => {
@@ -45,10 +92,9 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
       {/* Welcome Header */}
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Chào buổi sáng, Minh.</h1>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Chào buổi sáng.</h1>
           <p className="text-slate-500 mt-1">Đây là tổng quan các mối quan hệ của bạn hôm nay.</p>
         </div>
-        {/* System Stable badge removed */}
       </div>
 
       {/* Main Grid - 2 Columns Layout */}
@@ -65,7 +111,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                      <Pie
-                        data={HEALTH_DATA}
+                        data={stats.length > 0 ? stats : [{name: 'Empty', value: 1, color: '#f1f5f9'}]}
                         innerRadius={60}
                         outerRadius={80}
                         paddingAngle={5}
@@ -73,7 +119,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                         startAngle={90}
                         endAngle={-270}
                      >
-                        {HEALTH_DATA.map((entry, index) => (
+                        {stats.map((entry, index) => (
                            <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                         ))}
                      </Pie>
@@ -81,13 +127,13 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                </ResponsiveContainer>
                {/* Center Text */}
                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                  <span className="text-3xl font-bold text-slate-900 block">128</span>
+                  <span className="text-3xl font-bold text-slate-900 block">{totalConnections}</span>
                   <span className="text-xs text-slate-400 uppercase tracking-wide">Connections</span>
                </div>
             </div>
 
             <div className="flex flex-wrap justify-center gap-3 mt-4">
-               {HEALTH_DATA.map(item => (
+               {stats.map(item => (
                   <div key={item.name} className="flex items-center gap-1.5">
                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }}></div>
                      <span className="text-[10px] text-slate-500 font-medium">{item.name}</span>
@@ -139,7 +185,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                            </div>
                         </div>
                         <button 
-                           onClick={(e) => { e.stopPropagation(); toggleFavorite(event.id); }}
+                           onClick={(e) => { e.stopPropagation(); toggleFavorite(event.id, event.isFavorite); }}
                            className={`p-1.5 rounded-full transition-colors ${event.isFavorite ? 'text-red-500 bg-red-50' : 'text-slate-300 hover:text-red-400 hover:bg-slate-50'}`}
                         >
                            <Heart size={14} fill={event.isFavorite ? "currentColor" : "none"} />

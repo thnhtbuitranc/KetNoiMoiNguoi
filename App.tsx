@@ -11,6 +11,7 @@ import CalendarPage from './pages/Calendar';
 import SettingsPage from './pages/Settings';
 import { Language } from './types';
 import { Button } from './components/ui';
+import { supabase } from './services/supabase';
 
 // Sidebar Navigation
 const Sidebar: React.FC<{ 
@@ -75,10 +76,10 @@ const Sidebar: React.FC<{
              </Link>
             
             <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors" onClick={onLogout}>
-               <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100" className="w-10 h-10 rounded-full object-cover border-2 border-white" />
+               <img src="https://ui-avatars.com/api/?name=User&background=random" className="w-10 h-10 rounded-full object-cover border-2 border-white" />
                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-900 truncate">Nguyen An</p>
-                  <p className="text-xs text-slate-500 truncate">Free Plan</p>
+                  <p className="text-sm font-bold text-slate-900 truncate">Account</p>
+                  <p className="text-xs text-slate-500 truncate">Sign Out</p>
                </div>
                <LogOut size={16} className="text-slate-400" />
             </div>
@@ -95,7 +96,28 @@ const AppContent: React.FC = () => {
   const [showAuth, setShowAuth] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
+  useEffect(() => {
+    // 1. Check active session on startup
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setIsLoggedIn(!!session);
+    });
+
+    // 2. Listen for changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLoggedIn(!!session);
+      if (!session) setShowAuth(false); 
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  
   const toggleLang = () => setLang(prev => prev === Language.VI ? Language.EN : Language.VI);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsLoggedIn(false);
+    setShowAuth(false);
+  };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
@@ -155,7 +177,7 @@ const AppContent: React.FC = () => {
           isOpen={sidebarOpen} 
           onClose={() => setSidebarOpen(false)} 
           lang={lang} 
-          onLogout={() => { setIsLoggedIn(false); setShowAuth(false); }} 
+          onLogout={handleLogout} 
         />
       )}
 

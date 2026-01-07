@@ -1,44 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2 } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface ConnectionsProps {
   lang: Language;
 }
-
-// EXPANDED MOCK DATA (20 USERS)
-const INITIAL_CONNECTIONS: Connection[] = [
-  // TIER 5 - SOULMATE (3)
-  { id: '1', name: 'Nguyễn Văn A', nickname: 'Chồng Yêu', role: 'Chồng', tier: RelationshipTier.SOULMATE, tags: ['Gia đình', 'Nhà'], phone: '0909123456', location: 'Hà Nội', lastInteraction: '2023-10-25', memoriesCount: 124, birthday: '15/08', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&fit=crop', source: 'APP' },
-  { id: '2', name: 'Trần Thị Mai', nickname: 'BFF', role: 'Bạn thân 20 năm', tier: RelationshipTier.SOULMATE, tags: ['Cấp 2', 'Du lịch'], phone: '0912345678', location: 'TP.HCM', lastInteraction: '2023-10-20', memoriesCount: 89, birthday: '20/10', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&fit=crop', source: 'MANUAL' },
-  { id: '3', name: 'Lê Thu Hà', nickname: 'Sis', role: 'Em gái', tier: RelationshipTier.SOULMATE, tags: ['Gia đình'], phone: '0987654321', location: 'Đà Nẵng', lastInteraction: '2023-10-24', memoriesCount: 200, birthday: '05/05', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&fit=crop', source: 'APP' },
-
-  // TIER 4 - FAMILY/IMPORTANT (4)
-  { id: '4', name: 'Phạm Văn Hùng', role: 'Bố', tier: RelationshipTier.FAMILY, tags: ['Gia đình'], phone: '', location: 'Hải Phòng', lastInteraction: '2023-10-15', memoriesCount: 45, birthday: '02/01', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&fit=crop', source: 'APP' },
-  { id: '5', name: 'Hoàng Thị Lan', role: 'Mẹ', tier: RelationshipTier.FAMILY, tags: ['Gia đình'], phone: '', location: 'Hải Phòng', lastInteraction: '2023-10-15', memoriesCount: 50, birthday: '12/12', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&fit=crop', source: 'MANUAL' },
-  { id: '6', name: 'Nguyễn Quốc Bảo', role: 'Anh trai', tier: RelationshipTier.FAMILY, tags: ['Gia đình'], phone: '', location: 'Sài Gòn', lastInteraction: '2023-09-30', memoriesCount: 12, birthday: '', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&fit=crop', source: 'MANUAL' },
-  { id: '7', name: 'Sarah Jenkins', role: 'Mentor', tier: RelationshipTier.FAMILY, tags: ['Công việc', 'Mentor'], phone: '', location: 'USA', lastInteraction: '2023-09-01', memoriesCount: 30, birthday: '', avatar: 'https://images.unsplash.com/photo-1554151228-14d9def656ec?w=400&fit=crop', source: 'APP' },
-
-  // TIER 3 - CLOSE FRIEND (5)
-  { id: '8', name: 'Trương Minh Tuấn', nickname: 'Tuấn Còi', role: 'Đồng nghiệp cũ', tier: RelationshipTier.FRIEND, tags: ['Công ty A'], phone: '', location: 'Hà Nội', lastInteraction: '2023-08-10', memoriesCount: 5, birthday: '11/11', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=400&fit=crop', source: 'MANUAL' },
-  { id: '9', name: 'Vũ Thị Ngọc', role: 'Hội sách', tier: RelationshipTier.FRIEND, tags: ['Sách', 'Cafe'], phone: '', location: 'Hà Nội', lastInteraction: '2023-09-20', memoriesCount: 8, birthday: '', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&fit=crop', source: 'APP' },
-  { id: '10', name: 'Kevin Durant', role: 'Đối tác', tier: RelationshipTier.FRIEND, tags: ['Bóng rổ'], phone: '', location: 'HCMC', lastInteraction: '2023-10-01', memoriesCount: 2, birthday: '', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop', source: 'MANUAL' },
-  { id: '11', name: 'Lâm Xung', role: 'Bạn Gym', tier: RelationshipTier.FRIEND, tags: ['Gym'], phone: '', location: '', lastInteraction: '2023-10-22', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=400&fit=crop', source: 'APP' },
-  { id: '12', name: 'Jessica Jung', role: 'Bạn du học', tier: RelationshipTier.FRIEND, tags: ['Úc'], phone: '', location: 'Melbourne', lastInteraction: '2023-06-15', memoriesCount: 15, birthday: '', avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&fit=crop', source: 'APP' },
-
-  // TIER 2 - CASUAL (4)
-  { id: '13', name: 'Phan Hải', role: 'Sale BĐS', tier: RelationshipTier.CASUAL, tags: ['Công việc'], phone: '', location: '', lastInteraction: '2023-05-20', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&fit=crop', source: 'MANUAL' },
-  { id: '14', name: 'Đỗ Mỹ Linh', role: 'Hàng xóm', tier: RelationshipTier.CASUAL, tags: ['Khu phố'], phone: '', location: '', lastInteraction: '2023-10-10', memoriesCount: 1, birthday: '', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=400&fit=crop', source: 'MANUAL' },
-  { id: '15', name: 'Trần Văn Quyết', role: 'Thợ sửa xe', tier: RelationshipTier.CASUAL, tags: ['Dịch vụ'], phone: '', location: '', lastInteraction: '2023-01-01', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&fit=crop', source: 'MANUAL' },
-  { id: '16', name: 'Ngô Thanh Vân', role: 'Khách hàng', tier: RelationshipTier.CASUAL, tags: ['Dự án X'], phone: '', location: '', lastInteraction: '2023-04-12', memoriesCount: 3, birthday: '', avatar: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&fit=crop', source: 'APP' },
-
-  // TIER 1 - ACQUAINTANCE (4)
-  { id: '17', name: 'Bác Bảo vệ', role: 'Chung cư', tier: RelationshipTier.ACQUAINTANCE, tags: [], phone: '', location: '', lastInteraction: '2023-10-25', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&fit=crop', source: 'MANUAL' },
-  { id: '18', name: 'Shipper GHTK', role: 'Giao hàng', tier: RelationshipTier.ACQUAINTANCE, tags: [], phone: '', location: '', lastInteraction: '2023-10-23', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=400&fit=crop', source: 'MANUAL' },
-  { id: '19', name: 'Chị Bán Rau', role: 'Chợ', tier: RelationshipTier.ACQUAINTANCE, tags: [], phone: '', location: '', lastInteraction: '2023-10-21', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&fit=crop', source: 'MANUAL' },
-  { id: '20', name: 'Nhân viên Ngân hàng', role: 'VCB', tier: RelationshipTier.ACQUAINTANCE, tags: [], phone: '', location: '', lastInteraction: '2022-12-12', memoriesCount: 0, birthday: '', avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&fit=crop', source: 'MANUAL' },
-];
 
 const TierBadge: React.FC<{ tier: RelationshipTier }> = ({ tier }) => {
    const config = {
@@ -66,11 +34,12 @@ const SourceBadge: React.FC<{ source: 'APP' | 'MANUAL' }> = ({ source }) => {
 
 // Helper function to remove accents for better searching
 const normalizeString = (str: string) => {
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+  return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase() : "";
 };
 
 const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
-  const [connections, setConnections] = useState<Connection[]>(INITIAL_CONNECTIONS);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'list' | 'galaxy'>('list');
   const [filter, setFilter] = useState('');
   
@@ -90,43 +59,121 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   });
   const [editingConnection, setEditingConnection] = useState<(Connection & { tagsString: string }) | null>(null);
 
-  const handleAddNew = () => {
-    if (!newConnection.name) return;
-    const newId = (connections.length + 1).toString();
-    const conn: Connection = {
-      id: newId,
-      name: newConnection.name || 'Unknown',
-      nickname: newConnection.nickname,
-      role: newConnection.role || '',
-      phone: newConnection.phone || '',
-      birthday: newConnection.birthday || '',
-      location: newConnection.location || '',
-      tier: newConnection.tier || RelationshipTier.ACQUAINTANCE,
-      source: 'MANUAL',
-      avatar: `https://ui-avatars.com/api/?name=${newConnection.name}&background=random`,
-      lastInteraction: new Date().toISOString().split('T')[0],
-      memoriesCount: 0,
-      tags: newConnection.tagsString ? newConnection.tagsString.split(',').map(t => t.trim()).filter(t => t) : []
-    };
-    setConnections([conn, ...connections]);
-    setIsAddModalOpen(false);
-    setNewConnection({ name: '', nickname: '', role: '', phone: '', birthday: '', location: '', tier: RelationshipTier.ACQUAINTANCE, source: 'MANUAL', tagsString: '' });
+  // --- 1. FETCH DATA ---
+  const fetchConnections = async () => {
+    setLoading(true);
+    logDbOperation('Connections', 'Fetching data...');
+    try {
+       const { data, error } = await supabase.from('connections').select('*').order('created_at', { ascending: false });
+       
+       if (error) throw error;
+       
+       logDbOperation('Connections', 'Data received', data);
+
+       const formattedData: Connection[] = data.map((item: any) => ({
+          id: item.id,
+          name: item.name,
+          nickname: item.nickname,
+          role: item.role,
+          phone: item.phone,
+          location: item.location,
+          birthday: item.birthday,
+          tier: item.tier,
+          avatar: item.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`,
+          lastInteraction: item.last_interaction_date,
+          source: item.source || 'MANUAL',
+          memoriesCount: 0, // Need join for real count
+          tags: item.tags || []
+       }));
+
+       setConnections(formattedData);
+    } catch (err: any) {
+       logDbOperation('Connections', 'Fetch Failed', null, err);
+       alert("Lỗi tải danh bạ: " + err.message);
+    } finally {
+       setLoading(false);
+    }
   };
 
+  useEffect(() => {
+     fetchConnections();
+  }, []);
+
+  // --- 2. ADD DATA ---
+  const handleAddNew = async () => {
+    if (!newConnection.name) return;
+    
+    try {
+       const { data: { user } } = await supabase.auth.getUser();
+       if (!user) throw new Error("No authenticated user");
+
+       const payload = {
+          user_id: user.id,
+          name: newConnection.name,
+          nickname: newConnection.nickname,
+          role: newConnection.role,
+          phone: newConnection.phone,
+          location: newConnection.location,
+          birthday: newConnection.birthday,
+          tier: newConnection.tier || 1,
+          tags: newConnection.tagsString ? newConnection.tagsString.split(',').map(t => t.trim()).filter(t => t) : [],
+          source: 'MANUAL',
+          avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(newConnection.name)}&background=random`,
+          last_interaction_date: new Date().toISOString().split('T')[0]
+       };
+
+       logDbOperation('Connections', 'Insert Request', payload);
+
+       const { data, error } = await supabase.from('connections').insert(payload).select();
+       
+       if (error) throw error;
+       
+       logDbOperation('Connections', 'Insert Success', data);
+       fetchConnections(); // Refresh
+       setIsAddModalOpen(false);
+       setNewConnection({ name: '', nickname: '', role: '', phone: '', birthday: '', location: '', tier: RelationshipTier.ACQUAINTANCE, source: 'MANUAL', tagsString: '' });
+
+    } catch (err: any) {
+       logDbOperation('Connections', 'Insert Failed', null, err);
+       alert("Lỗi thêm mới: " + err.message);
+    }
+  };
+
+  // --- 3. EDIT DATA ---
   const startEdit = (conn: Connection) => {
     setEditingConnection({ ...conn, tagsString: conn.tags ? conn.tags.join(', ') : '' });
     setIsEditModalOpen(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingConnection) return;
-    const updatedConn: Connection = {
-      ...editingConnection,
-      tags: editingConnection.tagsString ? editingConnection.tagsString.split(',').map(t => t.trim()).filter(t => t) : []
-    };
-    setConnections(connections.map(c => c.id === updatedConn.id ? updatedConn : c));
-    setIsEditModalOpen(false);
-    setEditingConnection(null);
+    try {
+       const payload = {
+          name: editingConnection.name,
+          nickname: editingConnection.nickname,
+          role: editingConnection.role,
+          phone: editingConnection.phone,
+          location: editingConnection.location,
+          birthday: editingConnection.birthday,
+          tier: editingConnection.tier,
+          tags: editingConnection.tagsString ? editingConnection.tagsString.split(',').map(t => t.trim()).filter(t => t) : []
+       };
+
+       logDbOperation('Connections', 'Update Request', { id: editingConnection.id, ...payload });
+
+       const { error } = await supabase.from('connections').update(payload).eq('id', editingConnection.id);
+
+       if (error) throw error;
+       
+       logDbOperation('Connections', 'Update Success');
+       fetchConnections(); // Refresh
+       setIsEditModalOpen(false);
+       setEditingConnection(null);
+
+    } catch (err: any) {
+       logDbOperation('Connections', 'Update Failed', null, err);
+       alert("Lỗi cập nhật: " + err.message);
+    }
   };
 
   const clearFilters = () => {
@@ -145,7 +192,17 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
         const today = new Date();
         today.setHours(0,0,0,0);
         const currentYear = today.getFullYear();
-        const [bDay, bMonth] = c.birthday.split('/').map(num => parseInt(num, 10));
+        const parts = c.birthday.includes('-') ? c.birthday.split('-') : c.birthday.split('/');
+        // Handle YYYY-MM-DD or DD/MM
+        let bDay, bMonth;
+        if (parts.length === 3) {
+            bDay = parseInt(parts[2]);
+            bMonth = parseInt(parts[1]);
+        } else {
+            bDay = parseInt(parts[0]);
+            bMonth = parseInt(parts[1]);
+        }
+
         let bDate = new Date(currentYear, bMonth - 1, bDay);
         if (birthdayFilter === 'TODAY') {
             if (bDate.getDate() !== today.getDate() || bDate.getMonth() !== today.getMonth()) return false;
@@ -174,8 +231,6 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const GalaxyView = ({ data, onEdit }: { data: Connection[], onEdit: (c: Connection) => void }) => {
      
      // Orbit Configuration: [Tier]: { radius: %, duration: sec, color: string }
-     // We will calculate exact px based on container size, but here we use % for responsive
-     // UPDATED: Tighter orbits (narrower gaps)
      const orbits = {
         5: { radius: 13, duration: 45, color: 'border-pink-500/30 shadow-[0_0_15px_rgba(236,72,153,0.2)]', zIndex: 50 },
         4: { radius: 21, duration: 65, color: 'border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.2)]', zIndex: 40 },
@@ -250,7 +305,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                     >
                       {connections.map((conn, index) => {
                          const startAngle = index * angleStep;
-                         // UPDATED: Avatar sizes reduced by 20%
+                         // Avatar sizes
                          const size = tier === 5 ? 70 : tier === 4 ? 58 : tier === 3 ? 48 : tier === 2 ? 38 : 32;
                          
                          return (
@@ -328,16 +383,6 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                 animation-play-state: paused;
              }
            `}</style>
-           
-           {/* Legend overlay */}
-           <div className="absolute bottom-6 right-6 bg-slate-900/80 backdrop-blur border border-slate-700 p-4 rounded-2xl text-xs text-slate-300 pointer-events-none">
-              <div className="font-bold mb-2 uppercase tracking-widest text-slate-500">Orbits</div>
-              <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,1)]"></div> Soulmate</div>
-              <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,1)]"></div> Family</div>
-              <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]"></div> Friend</div>
-              <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-slate-500"></div> Casual</div>
-           </div>
-
         </div>
      );
   };
@@ -464,13 +509,20 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
          )}
       </Card>
 
+      {/* Loading State */}
+      {loading && (
+          <div className="flex justify-center items-center py-20">
+             <Loader2 size={40} className="animate-spin text-primary-600" />
+          </div>
+      )}
+
       {/* Galaxy View */}
-      {viewMode === 'galaxy' && (
+      {!loading && viewMode === 'galaxy' && (
          <GalaxyView data={filteredConnections} onEdit={startEdit} />
       )}
 
       {/* Grid View */}
-      {viewMode === 'grid' && (
+      {!loading && viewMode === 'grid' && (
          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             {filteredConnections.map(conn => (
                <Card key={conn.id} className="p-6 flex flex-col items-center text-center relative group hover:-translate-y-1 transition-all duration-300">
@@ -529,7 +581,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
       )}
 
       {/* List View */}
-      {viewMode === 'list' && (
+      {!loading && viewMode === 'list' && (
          <Card className="overflow-hidden border-none shadow-sm">
             <div className="overflow-x-auto">
                <table className="w-full text-sm text-left">

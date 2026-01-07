@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Button, Badge, Modal, Input } from '../components/ui';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Cake, Heart, Flame, Clock, MoreHorizontal, Star, Briefcase, User } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Cake, Heart, Flame, Clock, MoreHorizontal, Star, Briefcase, User, Loader2 } from 'lucide-react';
 import { Language } from '../types';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface CalendarProps {
   lang: Language;
@@ -25,26 +26,6 @@ interface EventItem {
   isFavorite?: boolean;
 }
 
-// Mock Connection Data for Autocomplete
-const MOCK_CONNECTIONS = [
-  { id: '1', name: 'Nguyễn Văn A', nickname: 'Tèo' },
-  { id: '2', name: 'Trần Thị B', nickname: 'Mẹ' },
-  { id: '3', name: 'Lê Văn C', nickname: '' },
-  { id: '4', name: 'Phạm Thu D', nickname: 'Hana' },
-  { id: '5', name: 'Hoàng Văn E', nickname: '' },
-  { id: '6', name: 'Nguyễn Nam', nickname: 'Nam' },
-  { id: '7', name: 'Thành Nguyên', nickname: '' },
-];
-
-// Mock Data
-const EVENTS: EventItem[] = [
-  { id: '1', title: 'Sinh nhật Mẹ', date: '2023-10-20', displayDate: '20/10', type: EventType.BIRTHDAY, connectionName: 'Trần Thị B', daysLeft: 0, isFavorite: true },
-  { id: '2', title: 'Kỷ niệm ngày cưới', date: '2023-10-25', displayDate: '25/10', type: EventType.ANNIVERSARY, connectionName: 'Vợ', daysLeft: 5, isFavorite: true },
-  { id: '3', title: 'Giỗ Ông Nội', date: '2023-11-02', displayDate: '02/11 (ÂL)', type: EventType.MEMORIAL, connectionName: 'Gia đình', daysLeft: 13 },
-  { id: '4', title: 'Sinh nhật Sếp', date: '2023-11-10', displayDate: '10/11', type: EventType.BIRTHDAY, connectionName: 'Nguyễn Văn A', daysLeft: 21 },
-  { id: '5', title: 'Họp lớp C3', date: '2023-11-20', displayDate: '20/11', type: EventType.OTHER, connectionName: 'Nhóm Lớp 12A1', daysLeft: 31 },
-];
-
 const EventIcon: React.FC<{ type: EventType }> = ({ type }) => {
   switch (type) {
     case EventType.BIRTHDAY:
@@ -61,39 +42,111 @@ const EventIcon: React.FC<{ type: EventType }> = ({ type }) => {
 const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
   const [currentMonth, setCurrentMonth] = useState('Tháng 10, 2023');
   const [selectedType, setSelectedType] = useState<EventType | 'ALL' | 'FAVORITES'>('ALL');
-  const [eventsList, setEventsList] = useState(EVENTS);
+  const [eventsList, setEventsList] = useState<EventItem[]>([]);
   const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [newEvent, setNewEvent] = useState<Partial<EventItem>>({ type: EventType.OTHER });
   
   // Autocomplete State
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [connections, setConnections] = useState<any[]>([]);
 
-  const toggleFavorite = (id: string) => {
-    setEventsList(prev => prev.map(e => e.id === id ? { ...e, isFavorite: !e.isFavorite } : e));
+  // 1. Fetch Events & Connections
+  const fetchEvents = async () => {
+    setLoading(true);
+    logDbOperation('Calendar', 'Fetching events...');
+    try {
+        // Fetch Connections for Autocomplete
+        const { data: connData } = await supabase.from('connections').select('id, name, nickname');
+        if (connData) setConnections(connData);
+
+        // Fetch Events
+        // Note: Joining tables is robust, but if connection_id is null, it might skip. Using left join implicit logic or just select connection_id.
+        // For simplicity in display, we won't join name yet, just store free text if connection_id is null.
+        const { data, error } = await supabase
+            .from('events')
+            .select(`
+                *,
+                connections ( name, nickname )
+            `)
+            .order('event_date', { ascending: true });
+
+        if (error) throw error;
+        
+        logDbOperation('Calendar', 'Events Received', data);
+
+        const today = new Date();
+        const formattedEvents = data.map((e: any) => {
+            const eDate = new Date(e.event_date);
+            const displayDate = `${eDate.getDate().toString().padStart(2,'0')}/${(eDate.getMonth() + 1).toString().padStart(2,'0')}`;
+            
+            // Calculate days left
+            // Reset years to compare days only for recurring? Assuming single event for now.
+            const diffTime = eDate.getTime() - today.getTime();
+            const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            return {
+                id: e.id,
+                title: e.title,
+                date: e.event_date,
+                displayDate: displayDate,
+                type: e.type,
+                connectionName: e.connections?.name || 'Cá nhân',
+                daysLeft: daysLeft,
+                isFavorite: e.is_favorite
+            };
+        });
+
+        setEventsList(formattedEvents);
+
+    } catch (err: any) {
+        logDbOperation('Calendar', 'Error', null, err);
+    } finally {
+        setLoading(false);
+    }
   };
 
-  const handleAddEvent = () => {
+  useEffect(() => {
+    fetchEvents();
+  }, []);
+
+  const toggleFavorite = async (id: string, currentVal: boolean) => {
+    setEventsList(prev => prev.map(e => e.id === id ? { ...e, isFavorite: !e.isFavorite } : e));
+    await supabase.from('events').update({ is_favorite: !currentVal }).eq('id', id);
+  };
+
+  const handleAddEvent = async () => {
     if (!newEvent.title || !newEvent.date) return;
     
-    const d = new Date(newEvent.date);
-    const displayDate = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-    
-    const daysLeft = Math.floor(Math.random() * 30) + 1; 
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("No user");
 
-    const event: EventItem = {
-       id: Date.now().toString(),
-       title: newEvent.title,
-       date: newEvent.date,
-       displayDate: displayDate,
-       type: newEvent.type || EventType.OTHER,
-       connectionName: newEvent.connectionName || 'Cá nhân',
-       daysLeft: daysLeft,
-       isFavorite: false
-    };
+        // Find connection ID if name matches
+        const matchedConn = connections.find(c => c.name === newEvent.connectionName);
+        
+        const payload = {
+            user_id: user.id,
+            title: newEvent.title,
+            event_date: newEvent.date,
+            type: newEvent.type || 'OTHER',
+            connection_id: matchedConn?.id || null, // Optional link
+            recurrence: 'YEARLY'
+        };
 
-    setEventsList([...eventsList, event]);
-    setIsAddEventModalOpen(false);
-    setNewEvent({ type: EventType.OTHER });
+        logDbOperation('Calendar', 'Insert Event', payload);
+
+        const { error } = await supabase.from('events').insert(payload);
+        if (error) throw error;
+
+        fetchEvents();
+        setIsAddEventModalOpen(false);
+        setNewEvent({ type: EventType.OTHER });
+
+    } catch (err: any) {
+        logDbOperation('Calendar', 'Insert Failed', null, err);
+        alert("Lỗi thêm sự kiện: " + err.message);
+    }
   };
 
   const filteredEvents = selectedType === 'ALL' 
@@ -103,7 +156,7 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
     : eventsList.filter(e => e.type === selectedType);
     
   // Filter suggestions based on input
-  const filteredSuggestions = MOCK_CONNECTIONS.filter(c => {
+  const filteredSuggestions = connections.filter(c => {
      if (!newEvent.connectionName) return false;
      const search = newEvent.connectionName.toLowerCase();
      return c.name.toLowerCase().includes(search) || (c.nickname && c.nickname.toLowerCase().includes(search));
@@ -114,13 +167,12 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
      setShowSuggestions(false);
   };
 
-  // Helper to generate a simple grid for the calendar visual
   const renderCalendarGrid = () => {
     const days = [];
     for (let i = 1; i <= 31; i++) {
        const dayEvents = eventsList.filter(e => parseInt(e.date.split('-')[2]) === i);
        const hasEvent = dayEvents.length > 0;
-       const isToday = i === 20; // Mock today
+       const isToday = i === new Date().getDate(); 
        
        days.push(
           <div key={i} className="group relative">
@@ -242,7 +294,9 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                </span>
             </h3>
 
-            {filteredEvents.map((event) => (
+            {loading ? (
+                <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-400" /></div>
+            ) : filteredEvents.map((event) => (
                <div key={event.id} className="bg-white rounded-xl p-4 border border-slate-100 hover:border-primary-200 hover:shadow-md transition-all group cursor-pointer relative overflow-hidden">
                   {/* Left accent bar based on type */}
                   <div className={`absolute left-0 top-0 bottom-0 w-1 ${
@@ -254,8 +308,8 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                   <div className="flex items-center gap-4 pl-3">
                      {/* Date Box */}
                      <div className="flex flex-col items-center justify-center w-14 h-14 bg-slate-50 rounded-lg border border-slate-100">
-                        <span className="text-[10px] uppercase font-bold text-slate-400">{event.date.split('-')[1] === '11' ? 'NOV' : 'OCT'}</span>
-                        <span className="text-xl font-bold text-slate-900">{event.displayDate.split('/')[0]}</span>
+                        <span className="text-[10px] uppercase font-bold text-slate-400">THÁNG</span>
+                        <span className="text-xl font-bold text-slate-900">{event.date.split('-')[1]}</span>
                      </div>
 
                      {/* Info */}
@@ -283,7 +337,7 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                         )}
                         <div className="flex gap-2">
                            <button 
-                              onClick={(e) => { e.stopPropagation(); toggleFavorite(event.id); }}
+                              onClick={(e) => { e.stopPropagation(); toggleFavorite(event.id, !!event.isFavorite); }}
                               className={`p-2 rounded-full transition-colors ${event.isFavorite ? 'text-yellow-400 hover:text-yellow-500 bg-yellow-50' : 'text-slate-300 hover:text-yellow-400 hover:bg-slate-50'}`}
                               title="Mark as Favorite"
                            >
@@ -295,7 +349,7 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                </div>
             ))}
 
-            {filteredEvents.length === 0 && (
+            {!loading && filteredEvents.length === 0 && (
                <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
                   <p className="text-slate-400">Không có sự kiện nào trong danh mục này.</p>
                </div>
@@ -348,7 +402,6 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                      setShowSuggestions(true);
                   }}
                   onFocus={() => setShowSuggestions(true)}
-                  // onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} // Delay to allow click
                   placeholder="Nhập tên người liên quan..."
                   className="w-full"
                />
@@ -371,7 +424,7 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                            </div>
                         ))
                      ) : (
-                        <div className="px-4 py-2 text-sm text-slate-400 italic">Không tìm thấy người phù hợp</div>
+                        <div className="px-4 py-2 text-sm text-slate-400 italic">Không tìm thấy người phù hợp (sẽ lưu dưới dạng text)</div>
                      )}
                   </div>
                )}

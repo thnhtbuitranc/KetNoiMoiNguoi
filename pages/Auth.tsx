@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button, Input, Card } from '../components/ui';
 import { HeartHandshake, Mail, Lock, User, ArrowRight, Sparkles, Heart } from 'lucide-react';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface AuthProps {
   onLogin: () => void;
@@ -11,15 +12,82 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onBack }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Mock handle submit
-  const handleSubmit = (e: React.FormEvent) => {
+  // Form State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate network request
-    setTimeout(() => {
+
+    try {
+      if (isLogin) {
+        // LOGIN
+        logDbOperation('Auth', 'Login Request', { email });
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+        
+        logDbOperation('Auth', 'Login Success', data.user?.id);
+        onLogin();
+      } else {
+        // SIGNUP
+        logDbOperation('Auth', 'Signup Request', { email, name });
+        
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name: name, // Using 'name' as primary field
+              avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+            }
+          }
+        });
+
+        if (error) throw error;
+
+        logDbOperation('Auth', 'Signup Auth Success', data.user?.id);
+
+        // --- MANUAL PROFILE CREATION FALLBACK ---
+        // Ensure profile is created in the 'profiles' table immediately
+        if (data.user && data.session) {
+           logDbOperation('Auth', 'Creating Profile Manually...');
+           
+           const { error: profileError } = await supabase.from('profiles').upsert({
+              id: data.user.id,
+              name: name,
+              email: email, // Explicitly save email
+              avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+              updated_at: new Date().toISOString()
+           });
+           
+           if (profileError) {
+              console.error("Manual Profile Creation Failed:", profileError);
+              logDbOperation('Auth', 'Profile Creation Failed', null, profileError);
+           } else {
+              logDbOperation('Auth', 'Profile Created Successfully');
+           }
+        }
+
+        if (data.session) {
+          onLogin();
+        } else {
+          // If email confirmation is enabled on Supabase
+          alert("Đăng ký thành công! Vui lòng kiểm tra email để xác thực tài khoản.");
+          setIsLogin(true);
+        }
+      }
+    } catch (err: any) {
+      logDbOperation('Auth', 'Error', null, err);
+      alert(err.message || "Đã xảy ra lỗi. Vui lòng thử lại.");
+    } finally {
       setIsLoading(false);
-      onLogin();
-    }, 1500);
+    }
   };
 
   return (
@@ -57,9 +125,11 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onBack }) => {
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <Input 
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
                     placeholder="Ví dụ: Minh An" 
                     className="pl-10 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl py-3" 
-                    required 
+                    required={!isLogin}
                   />
                 </div>
               </div>
@@ -71,6 +141,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onBack }) => {
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <Input 
                   type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@example.com" 
                   className="pl-10 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl py-3" 
                   required 
@@ -87,6 +159,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin, onBack }) => {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <Input 
                   type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••" 
                   className="pl-10 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl py-3" 
                   required 

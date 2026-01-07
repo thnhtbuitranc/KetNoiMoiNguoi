@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button, Card, Badge, Modal, Input } from '../components/ui';
 import { Camera, Share2, Settings, Smartphone, Mail, MapPin, Activity, QrCode, Lock, Globe, Eye, EyeOff, Save, Download, Copy, Briefcase, GraduationCap, Palette, Users } from 'lucide-react';
 import { Language } from '../types';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface ProfileProps {
   lang: Language;
@@ -17,6 +18,7 @@ interface UserField {
 const Profile: React.FC<ProfileProps> = ({ lang }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [loading, setLoading] = useState(true);
   
   // File Input Refs
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -24,21 +26,89 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
 
   // Expanded User Data
   const [userInfo, setUserInfo] = useState({
-    name: "Nguyễn An",
-    role: "Product Designer",
-    location: "Saigon, VN",
-    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&fit=crop",
+    name: "User",
+    role: "Member",
+    location: "",
+    avatar: "https://ui-avatars.com/api/?background=random",
     cover: "bg-gradient-to-r from-slate-200 to-slate-300",
     coverIsImage: false, // Track if cover is image or class string
-    email: { value: "an.nguyen@example.com", privacy: 'PRIVATE' } as UserField,
-    address: { value: "District 1, HCMC", privacy: 'CLOSE_FRIENDS' } as UserField,
-    job: { value: "Digital Nomad & Freelancer", privacy: 'PUBLIC' } as UserField,
-    education: { value: "RMIT University - Design", privacy: 'FRIENDS' } as UserField,
-    skills: { value: "UI/UX, React, Branding, Photography", privacy: 'PUBLIC' } as UserField,
-    hobbies: { value: "Hiking, Coffee, Indie Music", privacy: 'FRIENDS' } as UserField,
-    bio: "Building bridges, not walls. Focused on maintaining deep connections with a small circle of friends.",
-    tags: ["PHOTOGRAPHY", "TECH", "TRAVEL"]
+    email: { value: "", privacy: 'PRIVATE' } as UserField,
+    address: { value: "", privacy: 'CLOSE_FRIENDS' } as UserField,
+    job: { value: "", privacy: 'PUBLIC' } as UserField,
+    education: { value: "", privacy: 'FRIENDS' } as UserField,
+    skills: { value: "", privacy: 'PUBLIC' } as UserField,
+    hobbies: { value: "", privacy: 'FRIENDS' } as UserField,
+    bio: "",
+    tags: ["MEMBER"]
   });
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+        setLoading(true);
+        logDbOperation('Profile', 'Fetching profile...');
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+                
+                // Construct initial name if data is missing or incomplete
+                const initialName = data?.name || data?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || "User";
+                const initialAvatar = data?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(initialName)}&background=random`;
+
+                if (data) {
+                    logDbOperation('Profile', 'Loaded', data);
+                    setUserInfo(prev => ({
+                        ...prev,
+                        name: initialName,
+                        email: { ...prev.email, value: user.email || "" }, // Email from Auth User
+                        avatar: initialAvatar,
+                        bio: data.bio || '',
+                        location: data.location || '',
+                        role: data.role || 'User',
+                    }));
+                } else {
+                    // Initialize from Auth if no profile exists yet
+                     setUserInfo(prev => ({
+                        ...prev,
+                        name: initialName,
+                        email: { ...prev.email, value: user.email || "" },
+                        avatar: initialAvatar
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+    fetchProfile();
+  }, []);
+
+  const handleSave = async () => {
+      setIsEditing(false);
+      try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+          
+          logDbOperation('Profile', 'Updating...', userInfo);
+          
+          const updates = {
+              name: userInfo.name, // Correct column is 'name'
+              bio: userInfo.bio,
+              location: userInfo.location,
+              updated_at: new Date().toISOString()
+          };
+          
+          const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+          if (error) throw error;
+          
+          logDbOperation('Profile', 'Update Success');
+      } catch (e: any) {
+          logDbOperation('Profile', 'Update Failed', null, e);
+          alert("Error updating profile: " + e.message);
+      }
+  };
 
   const handlePrivacyChange = (field: keyof typeof userInfo, level: PrivacyLevel) => {
     setUserInfo(prev => ({
@@ -154,20 +224,20 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                
                {/* Info */}
                <h1 className="text-3xl font-bold text-slate-900 mb-1">{userInfo.name}</h1>
-               <p className="text-slate-500 font-medium mb-6">{userInfo.role} • {userInfo.location}</p>
+               <p className="text-slate-500 font-medium mb-6">{userInfo.role} • {userInfo.location || 'Unknown Location'}</p>
                
                {/* Stats */}
                <div className="flex justify-center gap-12 border-t border-b border-slate-100 py-6 mb-8">
                   <div className="text-center">
-                     <span className="block text-2xl font-bold text-slate-900">128</span>
+                     <span className="block text-2xl font-bold text-slate-900">...</span>
                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Connections</span>
                   </div>
                   <div className="text-center">
-                     <span className="block text-2xl font-bold text-slate-900">45</span>
+                     <span className="block text-2xl font-bold text-slate-900">...</span>
                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Memories</span>
                   </div>
                   <div className="text-center">
-                     <span className="block text-2xl font-bold text-green-600">92%</span>
+                     <span className="block text-2xl font-bold text-green-600">100%</span>
                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Health</span>
                   </div>
                </div>
@@ -179,7 +249,10 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                   </Button>
                   <Button 
                     className={`gap-2 px-6 ${isEditing ? 'bg-green-600 hover:bg-green-700' : 'bg-slate-900 hover:bg-slate-800'} text-white`}
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={() => {
+                        if (isEditing) handleSave();
+                        else setIsEditing(true);
+                    }}
                   >
                      {isEditing ? <Save size={16} /> : <Settings size={16} />} 
                      {isEditing ? 'Lưu Thay Đổi' : 'Chỉnh Sửa Hồ Sơ'}
@@ -201,10 +274,11 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                 value={userInfo.bio}
                 onChange={(e) => setUserInfo({...userInfo, bio: e.target.value})}
                 rows={3}
+                placeholder="Write a short bio..."
               />
             ) : (
               <p className="text-sm text-slate-600 leading-relaxed mb-8 italic border-l-4 border-slate-200 pl-4">
-                 "{userInfo.bio}"
+                 "{userInfo.bio || 'No bio yet.'}"
               </p>
             )}
             
@@ -222,6 +296,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                value={userInfo.email.value} 
                                onChange={(e) => handleValueChange('email', e.target.value)} 
                                className="py-1.5"
+                               disabled // Email changes usually require auth flow
                              />
                            ) : (
                              <span className="truncate">{userInfo.email.value}</span>
@@ -252,12 +327,13 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                            <MapPin size={18} className="text-slate-400 shrink-0" />
                            {isEditing ? (
                              <Input 
-                               value={userInfo.address.value} 
-                               onChange={(e) => handleValueChange('address', e.target.value)} 
+                               value={userInfo.location} // Map location here
+                               onChange={(e) => setUserInfo({...userInfo, location: e.target.value})} 
                                className="py-1.5"
+                               placeholder="City, Country"
                              />
                            ) : (
-                             <span className="truncate">{userInfo.address.value}</span>
+                             <span className="truncate">{userInfo.location || 'No location set'}</span>
                            )}
                         </div>
                         {isEditing ? (
@@ -296,7 +372,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                className="py-1.5"
                              />
                            ) : (
-                             <span className="truncate">{userInfo.job.value}</span>
+                             <span className="truncate">{userInfo.job.value || 'Not set'}</span>
                            )}
                         </div>
                         {isEditing ? (
@@ -328,7 +404,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                className="py-1.5"
                              />
                            ) : (
-                             <span className="truncate">{userInfo.education.value}</span>
+                             <span className="truncate">{userInfo.education.value || 'Not set'}</span>
                            )}
                         </div>
                         {isEditing ? (
@@ -366,7 +442,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                className="py-1.5"
                              />
                            ) : (
-                             <span className="truncate">Skills: {userInfo.skills.value}</span>
+                             <span className="truncate">Skills: {userInfo.skills.value || 'None'}</span>
                            )}
                         </div>
                         {isEditing ? (
@@ -398,7 +474,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                                className="py-1.5"
                              />
                            ) : (
-                             <span className="truncate">Hobbies: {userInfo.hobbies.value}</span>
+                             <span className="truncate">Hobbies: {userInfo.hobbies.value || 'None'}</span>
                            )}
                         </div>
                         {isEditing ? (
@@ -427,55 +503,6 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                {userInfo.tags.map(tag => <Badge key={tag}>{tag}</Badge>)}
             </div>
          </Card>
-      </div>
-
-      {/* Sidebar Column */}
-      <div className="space-y-6">
-         {/* QR Code Card */}
-         <Card className="p-8 flex flex-col items-center text-center bg-gradient-to-b from-white to-slate-50">
-            <h3 className="font-bold text-slate-900 uppercase tracking-wider text-xs mb-6">Your Personal QR</h3>
-            <div className="bg-white p-3 rounded-xl shadow-lg border border-slate-100 mb-6 relative group">
-               <QrCode size={160} className="text-slate-900" />
-               {/* Public Data Count Badge */}
-               <div className="absolute -top-2 -right-2 bg-primary-600 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-md">
-                 {Object.values(userInfo).filter((v: any) => v.privacy === 'PUBLIC').length} Public Items
-               </div>
-            </div>
-            <p className="text-xs text-slate-500 mb-4 px-4">People scanning this will only see information you've marked as <span className="font-bold text-green-600">Public</span>.</p>
-            <div className="grid grid-cols-2 gap-2 w-full">
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowQrModal(true)}>
-                  <Share2 size={16} /> Share
-                </Button>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Smartphone size={16} /> Save
-                </Button>
-            </div>
-         </Card>
-
-         {/* Privacy Legend Card */}
-         {isEditing && (
-            <Card className="p-4 bg-slate-50 border-slate-200">
-               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-xs mb-3">Privacy Legend</h3>
-               <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                     <Globe size={14} className="text-green-500" /> 
-                     <span><strong>Public:</strong> Visible to anyone with QR.</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                     <Users size={14} className="text-blue-500" /> 
-                     <span><strong>Friends:</strong> Tier 1 (Acquaintance) and up.</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                     <StarIcon size={14} className="text-purple-500" /> 
-                     <span><strong>Close Friends:</strong> Tier 3 (Friend) and up.</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-600">
-                     <Lock size={14} className="text-red-400" /> 
-                     <span><strong>Only Me:</strong> Private.</span>
-                  </div>
-               </div>
-            </Card>
-         )}
       </div>
 
       {/* Share QR Modal */}
