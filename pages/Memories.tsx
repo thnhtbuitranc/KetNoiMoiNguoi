@@ -264,7 +264,7 @@ const Memories: React.FC<MemoriesProps> = ({ lang }) => {
                         <div className="relative">
                             <img 
                                 src={selectedMemory.connection_memories[0].connections.avatar_url} 
-                                className="w-8 h-8 rounded-full border border-slate-200" 
+                                className ="w-8 h-8 rounded-full border border-slate-200" 
                             />
                             <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm">
                                 <Heart size={10} className="text-red-500 fill-red-500" />
