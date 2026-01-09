@@ -1,4 +1,5 @@
 
+
 export const DbSchema = `
 -- ==============================================================================
 -- SUPABASE DATABASE SCHEMA - KET NOI MOI NGUOI
@@ -61,7 +62,9 @@ alter table public.profiles enable row level security;
 
 -- STRICT POLICIES: Only Owner can Select/Update/Insert raw table
 drop policy if exists "Public profiles are viewable by everyone" on profiles;
--- New Policy: Only allow users to view THEIR OWN profile directly
+
+-- NEW FIX: Drop the policy we are about to create to prevent 42710 error
+drop policy if exists "Users can view own profile" on profiles;
 create policy "Users can view own profile" 
   on profiles for select using (auth.uid() = id);
 
@@ -308,4 +311,25 @@ create policy "Vault Private Access"
   on storage.objects for all using (
     bucket_id = 'vault_files' and auth.uid() = owner
   );
+
+
+-- 9. NOTIFICATIONS TABLE
+create table if not exists public.notifications (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  type text not null, -- 'BIRTHDAY', 'REMINDER', 'SYSTEM', 'INTERACTION'
+  title text not null,
+  message text,
+  related_entity_id uuid, -- Link to Event, Connection, or Memory
+  related_entity_type text, -- 'EVENT', 'CONNECTION', 'MEMORY'
+  is_read boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.notifications enable row level security;
+
+drop policy if exists "Users can CRUD their own notifications" on notifications;
+create policy "Users can CRUD their own notifications" 
+  on notifications for all using (auth.uid() = user_id);
+
 `;

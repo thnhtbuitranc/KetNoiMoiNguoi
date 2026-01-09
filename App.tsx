@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { Home, User, Settings, LogOut, Menu, X, Bell, Search, LayoutGrid, HeartHandshake, Shield, Sparkles, FolderOpen, Grid, List, Calendar as CalendarIcon, StickyNote } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
@@ -12,7 +12,8 @@ import SettingsPage from './pages/Settings';
 import Memories from './pages/Memories';
 import { Language } from './types';
 import { Button } from './components/ui';
-import { supabase } from './services/supabase';
+import { supabase, checkAndGenerateNotifications } from './services/supabase';
+import NotificationPanel from './components/NotificationPanel';
 
 // Sidebar Navigation
 const Sidebar: React.FC<{ 
@@ -123,16 +124,28 @@ const AppContent: React.FC = () => {
   const [showAuth, setShowAuth] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
+  // Notification State
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const notifButtonRef = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
     // 1. Check active session on startup
     supabase.auth.getSession().then(({ data: { session } }) => {
       setIsLoggedIn(!!session);
+      if(session) {
+         // Run check for notifications
+         checkAndGenerateNotifications();
+      }
     });
 
     // 2. Listen for changes (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsLoggedIn(!!session);
-      if (!session) setShowAuth(false); 
+      if (!session) setShowAuth(false);
+      if (session && _event === 'SIGNED_IN') {
+         checkAndGenerateNotifications();
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -160,9 +173,24 @@ const AppContent: React.FC = () => {
                  </button>
                  <span className="font-bold text-lg">Kết Nối Mọi Người</span>
               </div>
-              <button className="relative w-10 h-10 flex items-center justify-center rounded-full bg-slate-50 text-slate-600">
-                  <Bell size={20} />
-              </button>
+              
+              {/* Mobile Bell */}
+              <div className="relative" ref={notifButtonRef}>
+                 <button 
+                    onClick={() => setShowNotifications(!showNotifications)}
+                    className="relative w-10 h-10 flex items-center justify-center rounded-full bg-slate-50 text-slate-600"
+                 >
+                    <Bell size={20} />
+                    {unreadCount > 0 && (
+                        <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>
+                    )}
+                 </button>
+                 <NotificationPanel 
+                     isOpen={showNotifications} 
+                     onClose={() => setShowNotifications(false)}
+                     onUpdateUnreadCount={setUnreadCount}
+                 />
+              </div>
            </header>
            
            {/* Desktop Top Bar */}
@@ -178,9 +206,24 @@ const AppContent: React.FC = () => {
                <button onClick={toggleLang} className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm transition-all font-bold text-xs">
                   {lang}
                </button>
-               <button className="w-10 h-10 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm transition-all">
-                  <Bell size={18} />
-               </button>
+               
+               {/* Desktop Bell */}
+               <div className="relative" ref={notifButtonRef}>
+                  <button 
+                     onClick={() => setShowNotifications(!showNotifications)}
+                     className={`w-10 h-10 flex items-center justify-center rounded-full border text-slate-600 hover:bg-slate-50 shadow-sm transition-all relative ${showNotifications ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-slate-200'}`}
+                  >
+                     <Bell size={18} />
+                     {unreadCount > 0 && (
+                        <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full"></span>
+                     )}
+                  </button>
+                  <NotificationPanel 
+                     isOpen={showNotifications} 
+                     onClose={() => setShowNotifications(false)}
+                     onUpdateUnreadCount={setUnreadCount}
+                 />
+               </div>
            </div>
 
            {/* Main Content */}

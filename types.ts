@@ -1,3 +1,4 @@
+
 export enum Language {
   VI = 'VI',
   EN = 'EN'
@@ -64,4 +65,16 @@ export interface DriveItem {
   type: 'FOLDER' | 'IMAGE' | 'DOC';
   size: string;
   sharedWith: string[]; // User IDs
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'BIRTHDAY' | 'REMINDER' | 'SYSTEM' | 'INTERACTION';
+  title: string;
+  message?: string;
+  relatedEntityId?: string;
+  relatedEntityType?: 'EVENT' | 'CONNECTION' | 'MEMORY';
+  isRead: boolean;
+  createdAt: string;
 }
