@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Button, Switch, Input } from '../components/ui';
-import { Bell, Lock, Globe, User, Palette, Moon, Shield, Eye, Mail } from 'lucide-react';
+import { Bell, Lock, Globe, User, Palette, Moon, Shield, Eye, Mail, Save } from 'lucide-react';
 import { Language } from '../types';
+import { supabase, logDbOperation } from '../services/supabase';
 
 interface SettingsProps {
   lang: Language;
@@ -19,6 +20,40 @@ const SettingsPage: React.FC<SettingsProps> = ({ lang }) => {
   const [publicProfile, setPublicProfile] = useState(true);
   const [showEmail, setShowEmail] = useState(false);
 
+  // User Profile State
+  const [profile, setProfile] = useState({ name: '', email: '' });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+     const fetchProfile = async () => {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+           const { data } = await supabase.from('profiles').select('name, email').eq('id', user.id).single();
+           if (data) {
+              setProfile({ name: data.name || '', email: data.email || user.email || '' });
+           } else {
+              setProfile({ name: '', email: user.email || '' });
+           }
+        }
+        setLoading(false);
+     };
+     fetchProfile();
+  }, []);
+
+  const handleUpdateProfile = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { error } = await supabase.from('profiles').update({ name: profile.name }).eq('id', user.id);
+      if (error) {
+         alert("Lỗi cập nhật: " + error.message);
+      } else {
+         alert("Cập nhật thông tin thành công!");
+         // Optionally trigger a global refresh via context if needed, but sidebar updates on mount
+      }
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'GENERAL':
@@ -32,14 +67,24 @@ const SettingsPage: React.FC<SettingsProps> = ({ lang }) => {
                 <div className="space-y-4">
                    <div>
                       <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Tên hiển thị</label>
-                      <Input defaultValue="Nguyễn An" />
+                      <Input 
+                        value={profile.name} 
+                        onChange={(e) => setProfile({...profile, name: e.target.value})}
+                        placeholder="Nhập tên hiển thị..."
+                      />
                    </div>
                    <div>
                       <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Email</label>
-                      <Input defaultValue="an.nguyen@example.com" disabled className="bg-slate-50 text-slate-500" />
+                      <Input 
+                        value={profile.email} 
+                        disabled 
+                        className="bg-slate-50 text-slate-500" 
+                      />
                    </div>
                    <div className="pt-2">
-                      <Button>Cập nhật thông tin</Button>
+                      <Button onClick={handleUpdateProfile} className="gap-2">
+                         <Save size={16} /> Cập nhật thông tin
+                      </Button>
                    </div>
                 </div>
              </Card>

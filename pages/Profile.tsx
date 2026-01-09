@@ -19,6 +19,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [counts, setCounts] = useState({ connections: 0, memories: 0 });
   
   // File Input Refs
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -49,8 +50,18 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
+                // Fetch Profile Data
                 const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
                 
+                // Fetch Counts
+                const { count: connCount } = await supabase.from('connections').select('*', { count: 'exact', head: true });
+                const { count: memCount } = await supabase.from('memories').select('*', { count: 'exact', head: true });
+                
+                setCounts({ 
+                    connections: connCount || 0, 
+                    memories: memCount || 0 
+                });
+
                 // Determine Name and Avatar Fallbacks
                 const initialName = data?.name || data?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || "User";
                 const initialAvatar = data?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(initialName)}&background=random`;
@@ -304,18 +315,14 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                )}
                
                {/* Stats */}
-               <div className="flex justify-center gap-12 border-t border-b border-slate-100 py-6 mb-8">
+               <div className="flex justify-center gap-16 border-t border-b border-slate-100 py-6 mb-8">
                   <div className="text-center">
-                     <span className="block text-2xl font-bold text-slate-900">...</span>
+                     <span className="block text-2xl font-bold text-slate-900">{counts.connections}</span>
                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Connections</span>
                   </div>
                   <div className="text-center">
-                     <span className="block text-2xl font-bold text-slate-900">...</span>
+                     <span className="block text-2xl font-bold text-slate-900">{counts.memories}</span>
                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Memories</span>
-                  </div>
-                  <div className="text-center">
-                     <span className="block text-2xl font-bold text-green-600">100%</span>
-                     <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Health</span>
                   </div>
                </div>
 

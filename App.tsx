@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { Home, User, Settings, LogOut, Menu, X, Bell, Search, LayoutGrid, HeartHandshake, Shield, Sparkles, FolderOpen, Grid, List, Calendar as CalendarIcon } from 'lucide-react';
+import { Home, User, Settings, LogOut, Menu, X, Bell, Search, LayoutGrid, HeartHandshake, Shield, Sparkles, FolderOpen, Grid, List, Calendar as CalendarIcon, StickyNote } from 'lucide-react';
 import LandingPage from './pages/LandingPage';
 import AuthPage from './pages/Auth';
 import Dashboard from './pages/Dashboard';
@@ -9,6 +9,7 @@ import Connections from './pages/Connections';
 import Vault from './pages/Vault';
 import CalendarPage from './pages/Calendar';
 import SettingsPage from './pages/Settings';
+import Memories from './pages/Memories';
 import { Language } from './types';
 import { Button } from './components/ui';
 import { supabase } from './services/supabase';
@@ -21,6 +22,31 @@ const Sidebar: React.FC<{
   onLogout: () => void;
 }> = ({ isOpen, onClose, lang, onLogout }) => {
   const location = useLocation();
+  const [userProfile, setUserProfile] = useState<{name: string, avatar: string}>({ 
+      name: 'Loading...', 
+      avatar: 'https://ui-avatars.com/api/?background=random' 
+  });
+
+  useEffect(() => {
+     const fetchUser = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+           const { data } = await supabase.from('profiles').select('name, avatar_url').eq('id', user.id).single();
+           if (data) {
+              setUserProfile({
+                 name: data.name || user.email?.split('@')[0] || 'User',
+                 avatar: data.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(data.name || 'User')}&background=random`
+              });
+           } else {
+              setUserProfile({
+                  name: user.email?.split('@')[0] || 'User',
+                  avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(user.email || 'U')}&background=random`
+              });
+           }
+        }
+     };
+     fetchUser();
+  }, [isOpen]); // Refresh when opened or mounted
   
   const NavItem: React.FC<{ to: string; icon: React.ElementType; label: string }> = ({ to, icon: Icon, label }) => {
     const isActive = location.pathname === to;
@@ -63,6 +89,7 @@ const Sidebar: React.FC<{
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-4 mt-2">Menu</div>
             <NavItem to="/dashboard" icon={LayoutGrid} label={'Tổng quan'} />
             <NavItem to="/connections" icon={HeartHandshake} label={'Danh bạ'} />
+            <NavItem to="/memories" icon={Sparkles} label={'Kỷ niệm'} />
             <NavItem to="/calendar" icon={CalendarIcon} label={'Lịch & Sự kiện'} />
             <NavItem to="/vault" icon={FolderOpen} label={'Kho lưu trữ'} />
             <NavItem to="/profile" icon={User} label={'Hồ sơ cá nhân'} />
@@ -76,10 +103,10 @@ const Sidebar: React.FC<{
              </Link>
             
             <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors" onClick={onLogout}>
-               <img src="https://ui-avatars.com/api/?name=User&background=random" className="w-10 h-10 rounded-full object-cover border-2 border-white" />
+               <img src={userProfile.avatar} className="w-10 h-10 rounded-full object-cover border-2 border-white" />
                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-900 truncate">Account</p>
-                  <p className="text-xs text-slate-500 truncate">Sign Out</p>
+                  <p className="text-sm font-bold text-slate-900 truncate">{userProfile.name}</p>
+                  <p className="text-xs text-slate-500 truncate">Đăng xuất</p>
                </div>
                <LogOut size={16} className="text-slate-400" />
             </div>
@@ -161,6 +188,7 @@ const AppContent: React.FC = () => {
               <Routes>
                 <Route path="/dashboard" element={<Dashboard lang={lang} />} />
                 <Route path="/connections" element={<Connections lang={lang} />} />
+                <Route path="/memories" element={<Memories lang={lang} />} />
                 <Route path="/calendar" element={<CalendarPage lang={lang} />} />
                 <Route path="/vault" element={<Vault lang={lang} />} />
                 <Route path="/profile" element={<Profile lang={lang} />} />
