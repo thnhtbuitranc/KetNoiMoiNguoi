@@ -40,7 +40,9 @@ const EventIcon: React.FC<{ type: EventType }> = ({ type }) => {
 };
 
 const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
-  const [currentMonth, setCurrentMonth] = useState('Tháng 10, 2023');
+  // Use a Date object to track the currently displayed month
+  const [displayDate, setDisplayDate] = useState(new Date());
+  
   const [selectedType, setSelectedType] = useState<EventType | 'ALL' | 'FAVORITES'>('ALL');
   const [eventsList, setEventsList] = useState<EventItem[]>([]);
   const [isAddEventModalOpen, setIsAddEventModalOpen] = useState(false);
@@ -60,9 +62,6 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
         const { data: connData } = await supabase.from('connections').select('id, name, nickname');
         if (connData) setConnections(connData);
 
-        // Fetch Events
-        // Note: Joining tables is robust, but if connection_id is null, it might skip. Using left join implicit logic or just select connection_id.
-        // For simplicity in display, we won't join name yet, just store free text if connection_id is null.
         const { data, error } = await supabase
             .from('events')
             .select(`
@@ -149,6 +148,20 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
     }
   };
 
+  // Calendar Navigation Handlers
+  const handlePrevMonth = () => {
+    setDisplayDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setDisplayDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  };
+
+  const getMonthLabel = () => {
+    const label = displayDate.toLocaleString('vi-VN', { month: 'long', year: 'numeric' });
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  };
+
   const filteredEvents = selectedType === 'ALL' 
     ? eventsList 
     : selectedType === 'FAVORITES' 
@@ -168,11 +181,38 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
   };
 
   const renderCalendarGrid = () => {
+    const year = displayDate.getFullYear();
+    const month = displayDate.getMonth(); // 0-indexed
+
+    // Calculate days in month
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // Calculate start day of week (0=Sunday, ... 6=Saturday)
+    const firstDayOfWeek = new Date(year, month, 1).getDay();
+    
+    // Adjust for Monday start (Monday=0, ... Sunday=6)
+    // If Sunday (0) -> 6
+    // If Monday (1) -> 0
+    const startingOffset = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+
     const days = [];
-    for (let i = 1; i <= 31; i++) {
-       const dayEvents = eventsList.filter(e => parseInt(e.date.split('-')[2]) === i);
+    
+    // Add empty slots for previous month
+    for (let i = 0; i < startingOffset; i++) {
+        days.push(<div key={`empty-${i}`} className="h-10 w-10"></div>);
+    }
+
+    const todayObj = new Date();
+    const isCurrentMonth = todayObj.getMonth() === month && todayObj.getFullYear() === year;
+
+    for (let i = 1; i <= daysInMonth; i++) {
+       // Check for events on this specific date
+       // Note: eventsList.date is YYYY-MM-DD string
+       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+       const dayEvents = eventsList.filter(e => e.date === dateString);
+       
        const hasEvent = dayEvents.length > 0;
-       const isToday = i === new Date().getDate(); 
+       const isToday = isCurrentMonth && i === todayObj.getDate();
        
        days.push(
           <div key={i} className="group relative">
@@ -222,10 +262,10 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
             {/* Visual Calendar */}
             <Card className="p-6">
                <div className="flex items-center justify-between mb-6">
-                  <h3 className="font-bold text-slate-900">{currentMonth}</h3>
+                  <h3 className="font-bold text-slate-900 capitalize">{getMonthLabel()}</h3>
                   <div className="flex gap-1">
-                     <button className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded"><ChevronLeft size={20} /></button>
-                     <button className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded"><ChevronRight size={20} /></button>
+                     <button onClick={handlePrevMonth} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded"><ChevronLeft size={20} /></button>
+                     <button onClick={handleNextMonth} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded"><ChevronRight size={20} /></button>
                   </div>
                </div>
                
@@ -235,8 +275,6 @@ const CalendarPage: React.FC<CalendarProps> = ({ lang }) => {
                   ))}
                </div>
                <div className="grid grid-cols-7 gap-y-2 justify-items-center">
-                  <div className="h-10 w-10"></div>
-                  <div className="h-10 w-10"></div>
                   {renderCalendarGrid()}
                </div>
             </Card>
