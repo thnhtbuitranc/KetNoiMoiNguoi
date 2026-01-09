@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Modal, Input, Badge } from '../components/ui';
-import { Share2, Plus, UploadCloud, FileText, Image, Music, Folder, Key, Clock, Copy, CheckCircle2, Loader2 } from 'lucide-react';
+import { Share2, Plus, UploadCloud, FileText, Image, Music, Folder, Key, Clock, Copy, CheckCircle2, Loader2, X, Edit2 } from 'lucide-react';
 import { Language } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -16,6 +16,16 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   
+  // Image Preview State
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+
+  // Rename State
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [fileToRename, setFileToRename] = useState<any>(null);
+  const [newName, setNewName] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch Vault Items
@@ -32,6 +42,7 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
            type: f.type.toLowerCase(),
            date: new Date(f.created_at).toLocaleDateString(),
            size: f.size || '0 KB',
+           storage_path: f.storage_path, // Keep path for signing URLs
            icon: f.type === 'FOLDER' ? Folder : f.type === 'IMAGE' ? Image : f.type === 'AUDIO' ? Music : FileText,
            color: f.type === 'FOLDER' ? 'text-yellow-500 bg-yellow-50' : 'text-slate-500 bg-slate-50'
         }));
@@ -65,21 +76,24 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 1. Strict Validation: Images Only
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+        alert("Chỉ cho phép tải lên hình ảnh (PNG, JPG, JPEG).");
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+    }
+
     setUploading(true);
     try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not authenticated");
 
-        // 1. Prepare File Metadata
-        // Determine type based on MIME
-        let fileType = 'DOC';
-        if (file.type.startsWith('image/')) fileType = 'IMAGE';
-        else if (file.type.startsWith('audio/')) fileType = 'AUDIO';
-        
-        // Format size
+        // 2. Prepare File Metadata
+        const fileType = 'IMAGE'; // Forced as we only allow images now
         const fileSize = (file.size / 1024).toFixed(1) + ' KB';
 
-        // 2. Upload to Storage Bucket 'vault_files'
+        // 3. Upload to Storage Bucket 'vault_files'
         const fileExt = file.name.split('.').pop();
         const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
         const fileName = `${Date.now()}_${cleanName}`; 
@@ -93,7 +107,7 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
 
         if (uploadError) throw uploadError;
 
-        // 3. Save Metadata to DB
+        // 4. Save Metadata to DB
         const { error: dbError } = await supabase.from('vault_items').insert({
             user_id: user.id,
             name: file.name,
@@ -113,19 +127,76 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
         alert("Upload failed: " + error.message);
     } finally {
         setUploading(false);
-        if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input to allow same file selection
+        if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input
     }
+  };
+
+  // Rename Logic
+  const openRenameModal = (e: React.MouseEvent, file: any) => {
+    e.stopPropagation();
+    setFileToRename(file);
+    setNewName(file.name);
+    setIsRenameModalOpen(true);
+  };
+
+  const performRename = async () => {
+    if (!fileToRename || !newName.trim()) return;
+    
+    try {
+       logDbOperation('Vault', 'Renaming file...', { id: fileToRename.id, newName });
+       const { error } = await supabase
+          .from('vault_items')
+          .update({ name: newName.trim() })
+          .eq('id', fileToRename.id);
+
+       if (error) throw error;
+
+       // Optimistic update or refresh
+       setFiles(prev => prev.map(f => f.id === fileToRename.id ? { ...f, name: newName.trim() } : f));
+       setIsRenameModalOpen(false);
+       setFileToRename(null);
+       setNewName("");
+    } catch (error: any) {
+       logDbOperation('Vault', 'Rename Failed', null, error);
+       alert("Lỗi đổi tên: " + error.message);
+    }
+  };
+
+  // View Image Logic
+  const handleViewFile = async (file: any) => {
+     if (file.type !== 'image') return;
+     
+     setLoadingPreview(true);
+     setIsPreviewOpen(true);
+     setPreviewUrl(null);
+
+     try {
+        // Create Signed URL because bucket is private
+        const { data, error } = await supabase.storage
+           .from('vault_files')
+           .createSignedUrl(file.storage_path, 3600); // Valid for 1 hour
+
+        if (error) throw error;
+        setPreviewUrl(data.signedUrl);
+     } catch (err: any) {
+        console.error("Error signing URL:", err);
+        alert("Không thể mở ảnh này.");
+        setIsPreviewOpen(false);
+     } finally {
+        setLoadingPreview(false);
+     }
   };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
-      {/* Hidden Input */}
+      {/* Hidden Input - Restricted to Images */}
       <input 
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
         className="hidden" 
+        accept="image/png, image/jpeg, image/jpg"
       />
 
       {/* Header */}
@@ -144,7 +215,7 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
              disabled={uploading}
            >
               {uploading ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} 
-              {uploading ? 'Đang tải...' : 'Tải lên kỷ niệm'}
+              {uploading ? 'Đang tải...' : 'Tải lên ảnh'}
            </Button>
         </div>
       </div>
@@ -158,10 +229,10 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
             {uploading ? <Loader2 size={32} className="animate-spin text-primary-600" /> : <UploadCloud size={32} />}
          </div>
          <h3 className="text-lg font-bold text-slate-900 mb-2">
-            {uploading ? "Đang xử lý tập tin..." : "Kéo thả kỷ niệm vào đây"}
+            {uploading ? "Đang xử lý hình ảnh..." : "Kéo thả ảnh vào đây"}
          </h3>
          <p className="text-slate-500 text-sm max-w-sm mx-auto">
-            Hỗ trợ ảnh, video, âm thanh. Mọi dữ liệu đều được <span className="text-green-600 font-medium">mã hóa</span> trước khi lưu trữ vào Bucket.
+            Chỉ hỗ trợ định dạng <span className="text-slate-900 font-bold">PNG, JPG, JPEG</span>. Dữ liệu được mã hóa an toàn.
          </p>
       </div>
 
@@ -174,16 +245,29 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
         <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                 {files.length > 0 ? files.map((file) => (
-                    <Card key={file.id} className="p-5 flex flex-col items-center justify-center text-center aspect-[4/3] hover:shadow-md transition-shadow cursor-pointer border-none shadow-sm">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 ${file.color}`}>
-                        <file.icon size={24} />
+                    <div
+                        key={file.id} 
+                        className={`bg-white rounded-2xl border border-slate-200/60 shadow-card p-5 flex flex-col items-center justify-center text-center aspect-[4/3] relative group transition-all duration-300 ${file.type === 'image' ? 'cursor-pointer hover:shadow-lg hover:-translate-y-1 hover:bg-slate-50' : 'cursor-default'}`}
+                        onClick={() => handleViewFile(file)}
+                    >
+                        {/* Edit/Rename Button */}
+                        <button 
+                           onClick={(e) => openRenameModal(e, file)}
+                           className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-primary-600 hover:bg-slate-100 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                           title="Đổi tên"
+                        >
+                           <Edit2 size={14} />
+                        </button>
+
+                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-3 ${file.color}`}>
+                            <file.icon size={24} />
+                        </div>
+                        <h4 className="font-bold text-slate-900 text-sm truncate w-full mb-1 px-2">{file.name}</h4>
+                        <div className="flex justify-between w-full text-[10px] text-slate-400 font-medium px-1 mt-auto pt-2">
+                            <span>{file.date}</span>
+                            <span className="bg-slate-100 px-1 rounded text-slate-500">{file.size}</span>
+                        </div>
                     </div>
-                    <h4 className="font-bold text-slate-900 text-sm truncate w-full mb-1">{file.name}</h4>
-                    <div className="flex justify-between w-full text-[10px] text-slate-400 font-medium px-1 mt-auto pt-2">
-                        <span>{file.date}</span>
-                        <span className="bg-slate-100 px-1 rounded text-slate-500">{file.size}</span>
-                    </div>
-                    </Card>
                 )) : (
                     <div className="col-span-full text-center text-slate-400 py-8">Chưa có tập tin nào.</div>
                 )}
@@ -197,13 +281,26 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
                 <table className="w-full text-sm text-left">
                     <tbody className="divide-y divide-slate-100">
                     {files.map((file) => (
-                        <tr key={`list-${file.id}`} className="hover:bg-slate-50 transition-colors">
+                        <tr 
+                            key={`list-${file.id}`} 
+                            className={`hover:bg-slate-50 transition-colors group ${file.type === 'image' ? 'cursor-pointer' : ''}`}
+                            onClick={() => handleViewFile(file)}
+                        >
                             <td className="px-6 py-3 w-10">
                                 <file.icon size={18} className="text-slate-400" />
                             </td>
                             <td className="px-2 py-3 font-medium text-slate-700">{file.name}</td>
                             <td className="px-6 py-3 text-slate-500 text-right">{file.date}</td>
                             <td className="px-6 py-3 text-slate-500 text-right">{file.size}</td>
+                            <td className="px-6 py-3 text-right w-12 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                    onClick={(e) => openRenameModal(e, file)}
+                                    className="p-2 text-slate-400 hover:text-primary-600 hover:bg-slate-100 rounded-lg"
+                                    title="Đổi tên"
+                                >
+                                    <Edit2 size={16} />
+                                </button>
+                            </td>
                         </tr>
                     ))}
                     </tbody>
@@ -274,6 +371,54 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
             </div>
         )}
       </Modal>
+
+      {/* Rename Modal */}
+      <Modal 
+        isOpen={isRenameModalOpen} 
+        onClose={() => setIsRenameModalOpen(false)} 
+        title="Đổi tên tập tin"
+      >
+         <div className="space-y-4">
+            <div>
+               <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Tên mới</label>
+               <Input 
+                  value={newName} 
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Nhập tên mới..."
+                  autoFocus
+               />
+               <p className="text-xs text-slate-400 mt-1">Lưu ý: Đổi tên không ảnh hưởng đến nội dung tập tin.</p>
+            </div>
+            <div className="flex gap-3 pt-2">
+               <Button variant="secondary" fullWidth onClick={() => setIsRenameModalOpen(false)}>Hủy</Button>
+               <Button fullWidth onClick={performRename}>Lưu</Button>
+            </div>
+         </div>
+      </Modal>
+
+      {/* Image Preview Modal */}
+      {isPreviewOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsPreviewOpen(false)}>
+              <button className="absolute top-4 right-4 text-white/70 hover:text-white" onClick={() => setIsPreviewOpen(false)}>
+                  <X size={32} />
+              </button>
+              
+              <div className="relative max-w-4xl w-full max-h-[90vh] flex items-center justify-center" onClick={e => e.stopPropagation()}>
+                  {loadingPreview ? (
+                      <Loader2 size={48} className="animate-spin text-white" />
+                  ) : previewUrl ? (
+                      <img 
+                          src={previewUrl} 
+                          alt="Preview" 
+                          className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+                      />
+                  ) : (
+                      <div className="text-white">Không thể tải ảnh.</div>
+                  )}
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };
