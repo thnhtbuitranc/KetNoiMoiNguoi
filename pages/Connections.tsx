@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -56,6 +56,8 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   // --- MEMORY MODAL STATE ---
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [selectedConnectionForMemory, setSelectedConnectionForMemory] = useState<Connection | null>(null);
+  const [memoryFiles, setMemoryFiles] = useState<File[]>([]);
+  const [uploadingMemory, setUploadingMemory] = useState(false);
   const [memoryForm, setMemoryForm] = useState({
       title: '',
       content: '',
@@ -189,6 +191,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   // --- 4. MEMORY LOGIC ---
   const openMemoryModal = (conn: Connection) => {
      setSelectedConnectionForMemory(conn);
+     setMemoryFiles([]); // Reset files
      setMemoryForm({
         title: '',
         content: '',
@@ -198,12 +201,67 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
      setIsMemoryModalOpen(true);
   };
 
+  const handleMemoryFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    // Fix: Explicitly cast FileList to File[] for proper typing
+    const newFiles = Array.from(files) as File[];
+    
+    // Constraint 1: Max 3 photos total
+    if (memoryFiles.length + newFiles.length > 3) {
+      alert("Chỉ được phép tải lên tối đa 3 ảnh.");
+      return;
+    }
+
+    // Constraint 2: Each file < 3MB
+    const MAX_SIZE = 3 * 1024 * 1024;
+    const validFiles: File[] = [];
+    
+    for (const file of newFiles) {
+       if (file.size > MAX_SIZE) {
+         alert(`Ảnh ${file.name} quá lớn (>3MB). Vui lòng chọn ảnh nhỏ hơn.`);
+         return;
+       }
+       validFiles.push(file);
+    }
+
+    setMemoryFiles(prev => [...prev, ...validFiles]);
+    // Reset input value to allow selecting same file again if needed after removal
+    e.target.value = '';
+  };
+
+  const removeMemoryFile = (index: number) => {
+    setMemoryFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmitMemory = async () => {
      if (!selectedConnectionForMemory || !memoryForm.title) return;
+
+     setUploadingMemory(true);
 
      try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("No authenticated user");
+
+        // 0. Handle File Uploads (If any)
+        let uploadedPaths: string[] = [];
+        
+        if (memoryForm.type === 'PHOTO' && memoryFiles.length > 0) {
+           for (const file of memoryFiles) {
+              const fileExt = file.name.split('.').pop();
+              // Path structure: user_id/memories/timestamp_random.ext
+              const filePath = `${user.id}/memories/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+              
+              logDbOperation('Memory', `Uploading ${file.name}...`);
+              const { error: uploadError } = await supabase.storage
+                 .from('vault_files') // Using vault_files bucket
+                 .upload(filePath, file);
+              
+              if (uploadError) throw uploadError;
+              uploadedPaths.push(filePath);
+           }
+        }
 
         // 1. Insert into 'memories' table
         logDbOperation('Memory', 'Creating Memory...', memoryForm);
@@ -214,7 +272,9 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
               title: memoryForm.title,
               content: memoryForm.content,
               happened_at: memoryForm.date,
-              type: memoryForm.type
+              type: memoryForm.type,
+              // Store uploaded paths as JSON string in media_url
+              media_url: uploadedPaths.length > 0 ? JSON.stringify(uploadedPaths) : null 
            })
            .select()
            .single();
@@ -242,6 +302,8 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
      } catch (err: any) {
         logDbOperation('Memory', 'Failed', null, err);
         alert("Lỗi thêm kỷ niệm: " + err.message);
+     } finally {
+        setUploadingMemory(false);
      }
   };
 
@@ -957,14 +1019,56 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                  >
                     <option value="NOTE">Ghi chú</option>
                     <option value="PHOTO">Hình ảnh</option>
-                    <option value="VIDEO">Video</option>
-                    <option value="VOICE">Ghi âm</option>
                  </select>
               </div>
            </div>
+           
+           {/* Photo Upload Section */}
+           {memoryForm.type === 'PHOTO' && (
+              <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-300">
+                  <div className="flex justify-between items-center mb-2">
+                      <label className="text-xs font-bold text-slate-700 uppercase">Tải ảnh lên (Max 3)</label>
+                      <span className="text-[10px] text-slate-500">{memoryFiles.length}/3 ảnh</span>
+                  </div>
+                  
+                  {memoryFiles.length < 3 && (
+                      <div className="relative mb-3">
+                          <input 
+                              type="file" 
+                              multiple 
+                              accept="image/*"
+                              onChange={handleMemoryFileChange}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <div className="flex items-center justify-center gap-2 py-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                              <UploadCloud size={16} /> Chọn ảnh (Max 3MB/ảnh)
+                          </div>
+                      </div>
+                  )}
+
+                  {memoryFiles.length > 0 && (
+                      <div className="space-y-2">
+                          {memoryFiles.map((file, index) => (
+                              <div key={index} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200 text-sm">
+                                  <span className="truncate max-w-[200px]">{file.name}</span>
+                                  <button onClick={() => removeMemoryFile(index)} className="text-slate-400 hover:text-red-500">
+                                      <X size={16} />
+                                  </button>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+           )}
 
            <div className="pt-4">
-              <Button fullWidth onClick={handleSubmitMemory}>Lưu Kỷ Niệm</Button>
+              <Button fullWidth onClick={handleSubmitMemory} disabled={uploadingMemory}>
+                  {uploadingMemory ? (
+                      <span className="flex items-center gap-2">
+                          <Loader2 className="animate-spin" size={16} /> Đang lưu...
+                      </span>
+                  ) : 'Lưu Kỷ Niệm'}
+              </Button>
            </div>
         </div>
       </Modal>
