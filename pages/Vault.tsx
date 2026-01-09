@@ -73,58 +73,91 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 1. Strict Validation: Images Only
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
-    if (!allowedTypes.includes(file.type)) {
-        alert("Chỉ cho phép tải lên hình ảnh (PNG, JPG, JPEG).");
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
-    }
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
 
     setUploading(true);
+    
+    const MAX_SIZE_MB = 3;
+    const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    
+    let successCount = 0;
+    let errors: string[] = [];
+
     try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error("User not authenticated");
 
-        // 2. Prepare File Metadata
-        const fileType = 'IMAGE'; // Forced as we only allow images now
-        const fileSize = (file.size / 1024).toFixed(1) + ' KB';
+        // Convert FileList to Array for iteration
+        const files: File[] = Array.from(fileList);
 
-        // 3. Upload to Storage Bucket 'vault_files'
-        const fileExt = file.name.split('.').pop();
-        const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-        const fileName = `${Date.now()}_${cleanName}`; 
-        const filePath = `${user.id}/${fileName}`;
+        for (const file of files) {
+            // 1. Validate Type
+            if (!allowedTypes.includes(file.type)) {
+                errors.push(`${file.name}: Sai định dạng (chỉ PNG, JPG, JPEG).`);
+                continue;
+            }
 
-        logDbOperation('Vault', 'Uploading file to storage...', { path: filePath });
+            // 2. Validate Size
+            if (file.size > MAX_SIZE_BYTES) {
+                errors.push(`${file.name}: Quá lớn (>3MB).`);
+                continue;
+            }
 
-        const { error: uploadError } = await supabase.storage
-            .from('vault_files')
-            .upload(filePath, file);
+            try {
+                // 3. Prepare File Metadata
+                const fileType = 'IMAGE'; 
+                const fileSize = (file.size / 1024).toFixed(1) + ' KB';
+                const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+                // Use timestamp + random to avoid collision in loop
+                const fileName = `${Date.now()}_${Math.floor(Math.random() * 1000)}_${cleanName}`; 
+                const filePath = `${user.id}/${fileName}`;
 
-        if (uploadError) throw uploadError;
+                logDbOperation('Vault', `Uploading ${file.name}...`);
 
-        // 4. Save Metadata to DB
-        const { error: dbError } = await supabase.from('vault_items').insert({
-            user_id: user.id,
-            name: file.name,
-            type: fileType,
-            size: fileSize,
-            storage_path: filePath,
-            parent_id: null // Root for now
-        });
+                // 4. Upload to Storage Bucket 'vault_files'
+                const { error: uploadError } = await supabase.storage
+                    .from('vault_files')
+                    .upload(filePath, file);
 
-        if (dbError) throw dbError;
+                if (uploadError) throw uploadError;
 
-        logDbOperation('Vault', 'Upload Success');
-        fetchFiles(); // Refresh list
+                // 5. Save Metadata to DB
+                const { error: dbError } = await supabase.from('vault_items').insert({
+                    user_id: user.id,
+                    name: file.name,
+                    type: fileType,
+                    size: fileSize,
+                    storage_path: filePath,
+                    parent_id: null 
+                });
+
+                if (dbError) throw dbError;
+                successCount++;
+
+            } catch (err: any) {
+                console.error(err);
+                errors.push(`${file.name}: Lỗi tải lên (${err.message})`);
+            }
+        }
+
+        logDbOperation('Vault', `Batch Upload Finished. Success: ${successCount}, Errors: ${errors.length}`);
+        
+        if (successCount > 0) {
+            fetchFiles(); // Refresh list
+        }
+
+        if (errors.length > 0) {
+            alert(`Kết quả tải lên:\n- Thành công: ${successCount}\n- Lỗi:\n${errors.join('\n')}`);
+        } else if (successCount > 0) {
+            // All success, maybe show a toast? For now silent refresh is fine or simple alert if user uploaded many
+            if (successCount > 1) alert(`Đã tải lên thành công ${successCount} ảnh!`);
+        }
 
     } catch (error: any) {
-        logDbOperation('Vault', 'Upload Failed', null, error);
-        alert("Upload failed: " + error.message);
+        logDbOperation('Vault', 'Global Upload Error', null, error);
+        alert("Lỗi hệ thống: " + error.message);
     } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input
@@ -190,13 +223,14 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       
-      {/* Hidden Input - Restricted to Images */}
+      {/* Hidden Input - Restricted to Images, Multiple allowed */}
       <input 
         type="file" 
         ref={fileInputRef} 
         onChange={handleFileChange} 
         className="hidden" 
         accept="image/png, image/jpeg, image/jpg"
+        multiple
       />
 
       {/* Header */}
@@ -232,7 +266,7 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
             {uploading ? "Đang xử lý hình ảnh..." : "Kéo thả ảnh vào đây"}
          </h3>
          <p className="text-slate-500 text-sm max-w-sm mx-auto">
-            Chỉ hỗ trợ định dạng <span className="text-slate-900 font-bold">PNG, JPG, JPEG</span>. Dữ liệu được mã hóa an toàn.
+            Chỉ hỗ trợ định dạng <span className="text-slate-900 font-bold">PNG, JPG, JPEG</span> (Tối đa 3MB/ảnh).
          </p>
       </div>
 
@@ -244,7 +278,7 @@ const Vault: React.FC<VaultProps> = ({ lang }) => {
       ) : (
         <>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                {files.length > 0 ? files.map((file) => (
+                {files.length > 0 ? files.slice(0, 5).map((file) => (
                     <div
                         key={file.id} 
                         className={`bg-white rounded-2xl border border-slate-200/60 shadow-card p-5 flex flex-col items-center justify-center text-center aspect-[4/3] relative group transition-all duration-300 ${file.type === 'image' ? 'cursor-pointer hover:shadow-lg hover:-translate-y-1 hover:bg-slate-50' : 'cursor-default'}`}
