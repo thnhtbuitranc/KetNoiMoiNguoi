@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Card, Badge, Modal, Input } from '../components/ui';
-import { Camera, Share2, Settings, Smartphone, Mail, MapPin, Activity, QrCode, Lock, Globe, Eye, EyeOff, Save, Download, Copy, Briefcase, GraduationCap, Palette, Users, HelpCircle, ExternalLink, AlertTriangle, Key, ShieldCheck } from 'lucide-react';
+import { Camera, Share2, Settings, Smartphone, Mail, MapPin, Activity, QrCode, Lock, Globe, Eye, EyeOff, Save, Download, Copy, Briefcase, GraduationCap, Palette, Users, HelpCircle, ExternalLink, AlertTriangle, Key, ShieldCheck, Gamepad2, Home, Building2, BookOpen } from 'lucide-react';
 import { Language } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -13,6 +13,37 @@ type PrivacyLevel = 'PUBLIC' | 'FRIENDS' | 'CLOSE_FRIENDS' | 'PRIVATE';
 interface UserField {
   value: string;
   privacy: PrivacyLevel;
+}
+
+// Extended Profile Structure
+interface DetailedInfo {
+    // Education
+    preschool?: string;
+    primarySchool?: string;
+    secondarySchool?: string;
+    highSchool?: string;
+    highSchoolStream?: string; // Ban Tự nhiên/Xã hội
+    university?: string;
+    major?: string;
+    teachers?: string; // Giáo viên ấn tượng
+    
+    // Work
+    company?: string;
+    organization?: string;
+    officeBranch?: string;
+    partTimeJob?: string;
+    internship?: string;
+
+    // Living
+    hometown?: string;
+    neighborhood?: string; // Khu phố/thôn/xóm
+    dorm?: string; // Ký túc xá
+    apartment?: string; // Chung cư
+    rentalHouse?: string; // Nhà trọ
+    
+    // Hobbies / Other
+    clubs?: string; // CLB
+    games?: string;
 }
 
 const Profile: React.FC<ProfileProps> = ({ lang }) => {
@@ -43,7 +74,10 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     bio: "",
     tags: ["MEMBER"],
     uniqueId: "",
-    securityCode: ""
+    securityCode: "",
+    
+    // New Detailed Info JSONB
+    detailedInfo: {} as DetailedInfo
   });
 
   const [editSecurityCode, setEditSecurityCode] = useState("");
@@ -82,7 +116,8 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                     
                     // Parse Privacy Settings
                     const ps = data.privacy_settings || {};
-                    
+                    const details = data.detailed_info || {};
+
                     // Check if unique_id needs generation
                     let currentUniqueId = data.unique_id;
                     if (!currentUniqueId) {
@@ -109,7 +144,8 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                         address: { value: data.location || '', privacy: ps.address || 'CLOSE_FRIENDS' }, // Mapping address to location field for now
                         tags: data.tags && data.tags.length > 0 ? data.tags : ['MEMBER'],
                         uniqueId: currentUniqueId,
-                        securityCode: data.security_code || ""
+                        securityCode: data.security_code || "",
+                        detailedInfo: details
                     }));
                     setEditSecurityCode(data.security_code || "");
                 } else {
@@ -118,7 +154,8 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                         ...prev,
                         name: initialName,
                         email: { ...prev.email, value: user.email || "" },
-                        avatar: initialAvatar
+                        avatar: initialAvatar,
+                        detailedInfo: {}
                     }));
                 }
             }
@@ -171,6 +208,9 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
               tags: userInfo.tags,
               privacy_settings: privacySettings,
               
+              // Detailed Info (JSONB)
+              detailed_info: userInfo.detailedInfo,
+              
               // Security
               security_code: editSecurityCode,
               
@@ -200,6 +240,14 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
       ...prev,
       [field]: { ...prev[field as keyof typeof prev] as UserField, value: newValue }
     }));
+  };
+
+  // Helper for Detailed Info Update
+  const updateDetail = (key: keyof DetailedInfo, val: string) => {
+      setUserInfo(prev => ({
+          ...prev,
+          detailedInfo: { ...prev.detailedInfo, [key]: val }
+      }));
   };
   
   const triggerAvatarUpload = () => {
@@ -401,7 +449,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
          {/* Detailed Info Card */}
          <Card className="p-6">
             <div className="flex justify-between items-center mb-6">
-               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-xs">Profile Information</h3>
+               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-xs">Thông Tin Chi Tiết (Cho Tìm Kiếm)</h3>
                {isEditing && <span className="text-[10px] text-green-600 font-bold bg-green-50 px-2 py-1 rounded">EDITING MODE</span>}
             </div>
             
@@ -411,15 +459,124 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                 value={userInfo.bio}
                 onChange={(e) => setUserInfo({...userInfo, bio: e.target.value})}
                 rows={3}
-                placeholder="Write a short bio..."
+                placeholder="Giới thiệu ngắn về bản thân..."
               />
             ) : (
               <p className="text-sm text-slate-600 leading-relaxed mb-8 italic border-l-4 border-slate-200 pl-4">
-                 "{userInfo.bio || 'No bio yet.'}"
+                 "{userInfo.bio || 'Chưa có giới thiệu.'}"
               </p>
             )}
-            
-            <div className="space-y-6">
+
+            {/* EXPANDED DETAILS SECTION */}
+            <div className="space-y-8">
+                
+                {/* 1. Education Group */}
+                <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                        <GraduationCap className="text-indigo-600" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Học Vấn & Trường Lớp</h4>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {isEditing ? (
+                            <>
+                                <div><label className="text-xs text-slate-500 block mb-1">Mầm non</label><Input value={userInfo.detailedInfo?.preschool || ''} onChange={e => updateDetail('preschool', e.target.value)} placeholder="Tên trường..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 1 (Tiểu học)</label><Input value={userInfo.detailedInfo?.primarySchool || ''} onChange={e => updateDetail('primarySchool', e.target.value)} placeholder="Tên trường..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 2 (THCS)</label><Input value={userInfo.detailedInfo?.secondarySchool || ''} onChange={e => updateDetail('secondarySchool', e.target.value)} placeholder="Tên trường..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 3 (THPT)</label><Input value={userInfo.detailedInfo?.highSchool || ''} onChange={e => updateDetail('highSchool', e.target.value)} placeholder="Tên trường..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Ban học (C3)</label><Input value={userInfo.detailedInfo?.highSchoolStream || ''} onChange={e => updateDetail('highSchoolStream', e.target.value)} placeholder="VD: Ban A, Tự nhiên..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Đại học / CĐ</label><Input value={userInfo.detailedInfo?.university || ''} onChange={e => updateDetail('university', e.target.value)} placeholder="Tên trường..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Chuyên ngành</label><Input value={userInfo.detailedInfo?.major || ''} onChange={e => updateDetail('major', e.target.value)} placeholder="VD: CNTT..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Giáo viên ấn tượng</label><Input value={userInfo.detailedInfo?.teachers || ''} onChange={e => updateDetail('teachers', e.target.value)} placeholder="Thầy/Cô..." /></div>
+                            </>
+                        ) : (
+                            <div className="col-span-2 text-sm text-slate-600 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-8">
+                                {userInfo.detailedInfo?.preschool && <div><span className="font-semibold text-slate-900">Mầm non:</span> {userInfo.detailedInfo.preschool}</div>}
+                                {userInfo.detailedInfo?.primarySchool && <div><span className="font-semibold text-slate-900">Cấp 1:</span> {userInfo.detailedInfo.primarySchool}</div>}
+                                {userInfo.detailedInfo?.secondarySchool && <div><span className="font-semibold text-slate-900">Cấp 2:</span> {userInfo.detailedInfo.secondarySchool}</div>}
+                                {userInfo.detailedInfo?.highSchool && <div><span className="font-semibold text-slate-900">Cấp 3:</span> {userInfo.detailedInfo.highSchool}</div>}
+                                {userInfo.detailedInfo?.highSchoolStream && <div><span className="font-semibold text-slate-900">Ban:</span> {userInfo.detailedInfo.highSchoolStream}</div>}
+                                {userInfo.detailedInfo?.university && <div><span className="font-semibold text-slate-900">Đại học:</span> {userInfo.detailedInfo.university}</div>}
+                                {userInfo.detailedInfo?.major && <div><span className="font-semibold text-slate-900">Ngành:</span> {userInfo.detailedInfo.major}</div>}
+                                {userInfo.detailedInfo?.teachers && <div><span className="font-semibold text-slate-900">Giáo viên:</span> {userInfo.detailedInfo.teachers}</div>}
+                                {(!userInfo.detailedInfo?.highSchool && !userInfo.detailedInfo?.university) && <span className="text-slate-400 italic">Chưa có thông tin chi tiết.</span>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* 2. Work Group */}
+                <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                        <Briefcase className="text-blue-600" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Công Việc & Tổ Chức</h4>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {isEditing ? (
+                            <>
+                                <div><label className="text-xs text-slate-500 block mb-1">Công ty hiện tại</label><Input value={userInfo.detailedInfo?.company || ''} onChange={e => updateDetail('company', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Văn phòng / Chi nhánh</label><Input value={userInfo.detailedInfo?.officeBranch || ''} onChange={e => updateDetail('officeBranch', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Tổ chức tham gia</label><Input value={userInfo.detailedInfo?.organization || ''} onChange={e => updateDetail('organization', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Việc làm thêm</label><Input value={userInfo.detailedInfo?.partTimeJob || ''} onChange={e => updateDetail('partTimeJob', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Nơi thực tập</label><Input value={userInfo.detailedInfo?.internship || ''} onChange={e => updateDetail('internship', e.target.value)} /></div>
+                            </>
+                        ) : (
+                            <div className="col-span-2 text-sm text-slate-600 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-8">
+                                {userInfo.detailedInfo?.company && <div><span className="font-semibold text-slate-900">Công ty:</span> {userInfo.detailedInfo.company}</div>}
+                                {userInfo.detailedInfo?.officeBranch && <div><span className="font-semibold text-slate-900">Chi nhánh:</span> {userInfo.detailedInfo.officeBranch}</div>}
+                                {userInfo.detailedInfo?.organization && <div><span className="font-semibold text-slate-900">Tổ chức:</span> {userInfo.detailedInfo.organization}</div>}
+                                {userInfo.detailedInfo?.partTimeJob && <div><span className="font-semibold text-slate-900">Làm thêm:</span> {userInfo.detailedInfo.partTimeJob}</div>}
+                                {userInfo.detailedInfo?.internship && <div><span className="font-semibold text-slate-900">Thực tập:</span> {userInfo.detailedInfo.internship}</div>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* 3. Living Group */}
+                <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                        <Home className="text-orange-500" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Nơi Ở & Quê Quán</h4>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {isEditing ? (
+                            <>
+                                <div><label className="text-xs text-slate-500 block mb-1">Quê quán</label><Input value={userInfo.detailedInfo?.hometown || ''} onChange={e => updateDetail('hometown', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Khu phố / Thôn / Xóm</label><Input value={userInfo.detailedInfo?.neighborhood || ''} onChange={e => updateDetail('neighborhood', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Chung cư / Khu dân cư</label><Input value={userInfo.detailedInfo?.apartment || ''} onChange={e => updateDetail('apartment', e.target.value)} /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Ký túc xá / Nhà trọ</label><Input value={userInfo.detailedInfo?.dorm || ''} onChange={e => updateDetail('dorm', e.target.value)} placeholder="Tên KTX, số phòng..." /></div>
+                            </>
+                        ) : (
+                            <div className="col-span-2 text-sm text-slate-600 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-8">
+                                {userInfo.detailedInfo?.hometown && <div><span className="font-semibold text-slate-900">Quê quán:</span> {userInfo.detailedInfo.hometown}</div>}
+                                {userInfo.detailedInfo?.neighborhood && <div><span className="font-semibold text-slate-900">Khu vực:</span> {userInfo.detailedInfo.neighborhood}</div>}
+                                {userInfo.detailedInfo?.apartment && <div><span className="font-semibold text-slate-900">Chung cư:</span> {userInfo.detailedInfo.apartment}</div>}
+                                {userInfo.detailedInfo?.dorm && <div><span className="font-semibold text-slate-900">KTX/Trọ:</span> {userInfo.detailedInfo.dorm}</div>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                 {/* 4. Activities Group */}
+                 <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                        <Gamepad2 className="text-purple-500" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Sở Thích & Cộng Đồng</h4>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 gap-4">
+                        {isEditing ? (
+                            <>
+                                <div><label className="text-xs text-slate-500 block mb-1">Câu lạc bộ / Đội nhóm</label><Input value={userInfo.detailedInfo?.clubs || ''} onChange={e => updateDetail('clubs', e.target.value)} placeholder="CLB Guitar, Đội Tình nguyện..." /></div>
+                                <div><label className="text-xs text-slate-500 block mb-1">Game đã chơi</label><Input value={userInfo.detailedInfo?.games || ''} onChange={e => updateDetail('games', e.target.value)} placeholder="LoL, PUBG, Genshin..." /></div>
+                            </>
+                        ) : (
+                            <div className="text-sm text-slate-600 space-y-2">
+                                {userInfo.detailedInfo?.clubs && <div><span className="font-semibold text-slate-900">CLB:</span> {userInfo.detailedInfo.clubs}</div>}
+                                {userInfo.detailedInfo?.games && <div><span className="font-semibold text-slate-900">Game:</span> {userInfo.detailedInfo.games}</div>}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                {/* Secure Connection Section - NEW */}
                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
                   <h4 className="text-xs font-bold text-indigo-700 uppercase mb-3 flex items-center gap-2">
@@ -464,9 +621,9 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                   </div>
                </div>
 
-               {/* Contact Section */}
+               {/* Original Contact Section - Kept for High Level Info */}
                <div>
-                  <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Contact & Basic Info</h4>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Thông Tin Cơ Bản</h4>
                   <div className="space-y-4">
                      {/* Email */}
                      <div className="flex items-center justify-between group">
@@ -499,7 +656,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                            <MapPin size={18} className="text-slate-400 shrink-0" />
                            {isEditing ? (
                              <Input 
-                               value={userInfo.location} // This maps to both display location and address
+                               value={userInfo.location} 
                                onChange={(e) => setUserInfo({...userInfo, location: e.target.value})} 
                                className="py-1.5"
                                placeholder="City, Country"
@@ -523,150 +680,6 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                            <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
                               {getPrivacyIcon(userInfo.address.privacy)}
                               <span>{getPrivacyLabel(userInfo.address.privacy)}</span>
-                           </div>
-                        )}
-                     </div>
-                  </div>
-               </div>
-
-               {/* Work & Education */}
-               <div>
-                  <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Work & Education</h4>
-                  <div className="space-y-4">
-                     {/* Job */}
-                     <div className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
-                           <Briefcase size={18} className="text-slate-400 shrink-0" />
-                           {isEditing ? (
-                             <Input 
-                               value={userInfo.job.value} 
-                               onChange={(e) => handleValueChange('job', e.target.value)} 
-                               className="py-1.5"
-                               placeholder="Software Engineer at Company X"
-                             />
-                           ) : (
-                             <span className="truncate">{userInfo.job.value || 'Not set'}</span>
-                           )}
-                        </div>
-                        {isEditing ? (
-                           <select 
-                              value={userInfo.job.privacy}
-                              onChange={(e) => handlePrivacyChange('job', e.target.value as PrivacyLevel)}
-                              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:outline-none focus:border-primary-500"
-                           >
-                              <option value="PUBLIC">Public</option>
-                              <option value="FRIENDS">Friends</option>
-                              <option value="CLOSE_FRIENDS">Close Friends</option>
-                           </select>
-                        ) : (
-                           <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                              {getPrivacyIcon(userInfo.job.privacy)}
-                              <span>{getPrivacyLabel(userInfo.job.privacy)}</span>
-                           </div>
-                        )}
-                     </div>
-
-                     {/* Education */}
-                     <div className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
-                           <GraduationCap size={18} className="text-slate-400 shrink-0" />
-                           {isEditing ? (
-                             <Input 
-                               value={userInfo.education.value} 
-                               onChange={(e) => handleValueChange('education', e.target.value)} 
-                               className="py-1.5"
-                               placeholder="University of Life"
-                             />
-                           ) : (
-                             <span className="truncate">{userInfo.education.value || 'Not set'}</span>
-                           )}
-                        </div>
-                        {isEditing ? (
-                           <select 
-                              value={userInfo.education.privacy}
-                              onChange={(e) => handlePrivacyChange('education', e.target.value as PrivacyLevel)}
-                              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:outline-none focus:border-primary-500"
-                           >
-                              <option value="PUBLIC">Public</option>
-                              <option value="FRIENDS">Friends</option>
-                              <option value="CLOSE_FRIENDS">Close Friends</option>
-                           </select>
-                        ) : (
-                           <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                              {getPrivacyIcon(userInfo.education.privacy)}
-                              <span>{getPrivacyLabel(userInfo.education.privacy)}</span>
-                           </div>
-                        )}
-                     </div>
-                  </div>
-               </div>
-
-               {/* Interests */}
-               <div>
-                  <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Personal Interests</h4>
-                  <div className="space-y-4">
-                     {/* Skills */}
-                     <div className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
-                           <Activity size={18} className="text-slate-400 shrink-0" />
-                           {isEditing ? (
-                             <Input 
-                               value={userInfo.skills.value} 
-                               onChange={(e) => handleValueChange('skills', e.target.value)} 
-                               className="py-1.5"
-                               placeholder="React, Design, Writing..."
-                             />
-                           ) : (
-                             <span className="truncate">Skills: {userInfo.skills.value || 'None'}</span>
-                           )}
-                        </div>
-                        {isEditing ? (
-                           <select 
-                              value={userInfo.skills.privacy}
-                              onChange={(e) => handlePrivacyChange('skills', e.target.value as PrivacyLevel)}
-                              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:outline-none focus:border-primary-500"
-                           >
-                              <option value="PUBLIC">Public</option>
-                              <option value="FRIENDS">Friends</option>
-                              <option value="CLOSE_FRIENDS">Close Friends</option>
-                           </select>
-                        ) : (
-                           <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                              {getPrivacyIcon(userInfo.skills.privacy)}
-                              <span>{getPrivacyLabel(userInfo.skills.privacy)}</span>
-                           </div>
-                        )}
-                     </div>
-
-                     {/* Hobbies */}
-                     <div className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3 text-sm text-slate-600 flex-1 mr-4">
-                           <Palette size={18} className="text-slate-400 shrink-0" />
-                           {isEditing ? (
-                             <Input 
-                               value={userInfo.hobbies.value} 
-                               onChange={(e) => handleValueChange('hobbies', e.target.value)} 
-                               className="py-1.5"
-                               placeholder="Reading, Hiking, Gaming..."
-                             />
-                           ) : (
-                             <span className="truncate">Hobbies: {userInfo.hobbies.value || 'None'}</span>
-                           )}
-                        </div>
-                        {isEditing ? (
-                           <select 
-                              value={userInfo.hobbies.privacy}
-                              onChange={(e) => handlePrivacyChange('hobbies', e.target.value as PrivacyLevel)}
-                              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:outline-none focus:border-primary-500"
-                           >
-                              <option value="PUBLIC">Public</option>
-                              <option value="FRIENDS">Friends</option>
-                              <option value="CLOSE_FRIENDS">Close Friends</option>
-                           </select>
-                        ) : (
-                           <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded">
-                              {getPrivacyIcon(userInfo.hobbies.privacy)}
-                              <span>{getPrivacyLabel(userInfo.hobbies.privacy)}</span>
                            </div>
                         )}
                      </div>

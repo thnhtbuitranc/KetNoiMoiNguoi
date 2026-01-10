@@ -64,6 +64,11 @@ begin
   if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'security_code') then
     alter table public.profiles add column security_code text;
   end if;
+
+  -- NEW: Detailed Info (JSONB) for granular filtering (Schools, Hometown, Games, etc.)
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'detailed_info') then
+    alter table public.profiles add column detailed_info jsonb default '{}'::jsonb;
+  end if;
 end $$;
 
 -- Enable RLS
@@ -515,3 +520,4 @@ begin
     return jsonb_build_object('status', 'SUCCESS', 'message', 'Đã kết bạn thành công!');
 end;
 $$;
+`;
