@@ -1,5 +1,6 @@
 
 
+
 export const DbSchema = `
 -- ==============================================================================
 -- SUPABASE DATABASE SCHEMA - KET NOI MOI NGUOI
@@ -54,6 +55,14 @@ begin
   end if;
   if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'qr_code') then
     alter table public.profiles add column qr_code text;
+  end if;
+  
+  -- NEW: Unique ID and Security Code
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'unique_id') then
+    alter table public.profiles add column unique_id text unique;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'security_code') then
+    alter table public.profiles add column security_code text;
   end if;
 end $$;
 
@@ -317,11 +326,11 @@ create policy "Vault Private Access"
 create table if not exists public.notifications (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references public.profiles(id) on delete cascade not null,
-  type text not null, -- 'BIRTHDAY', 'REMINDER', 'SYSTEM', 'INTERACTION'
+  type text not null, -- 'BIRTHDAY', 'REMINDER', 'SYSTEM', 'INTERACTION', 'FRIEND_REQ'
   title text not null,
   message text,
   related_entity_id uuid, -- Link to Event, Connection, or Memory
-  related_entity_type text, -- 'EVENT', 'CONNECTION', 'MEMORY'
+  related_entity_type text, -- 'EVENT', 'CONNECTION', 'MEMORY', 'PROFILE'
   is_read boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -332,4 +341,177 @@ drop policy if exists "Users can CRUD their own notifications" on notifications;
 create policy "Users can CRUD their own notifications" 
   on notifications for all using (auth.uid() = user_id);
 
-`;
+-- 10. RPC: CONNECT BY CODE
+create or replace function public.connect_by_code(
+    target_unique_id text,
+    provided_code text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    sender_id uuid := auth.uid();
+    target_profile profiles;
+    sender_profile profiles;
+    result_status text := 'NOT_FOUND';
+    is_match boolean := false;
+begin
+    -- 1. Find Target
+    select * into target_profile from profiles where unique_id = target_unique_id;
+    
+    if not found then
+        return jsonb_build_object('status', 'NOT_FOUND', 'message', 'Mã người dùng không tồn tại.');
+    end if;
+
+    if target_profile.id = sender_id then
+        return jsonb_build_object('status', 'SELF', 'message', 'Không thể kết bạn với chính mình.');
+    end if;
+
+    select * into sender_profile from profiles where id = sender_id;
+
+    -- 2. Check Code
+    if target_profile.security_code is not null 
+       and target_profile.security_code <> '' 
+       and target_profile.security_code = provided_code then
+       is_match := true;
+    end if;
+
+    -- 3. Logic
+    if is_match then
+        -- A. Auto Connect (Mutual)
+        
+        -- Insert for Sender (You)
+        insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+        values (
+            sender_id,
+            target_profile.name,
+            target_profile.role,
+            target_profile.avatar_url,
+            1, -- Tier 1
+            'APP',
+            ARRAY[]::text[]
+        );
+
+        -- Insert for Target (Them)
+        insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+        values (
+            target_profile.id,
+            sender_profile.name,
+            sender_profile.role,
+            sender_profile.avatar_url,
+            1, -- Tier 1
+            'APP',
+            ARRAY[]::text[]
+        );
+
+        -- Notify Target
+        insert into notifications (user_id, type, title, message, related_entity_id, related_entity_type)
+        values (
+            target_profile.id,
+            'SYSTEM',
+            'Tự động kết nối mới!',
+            'Bạn đã được kết nối tự động với ' || sender_profile.name || ' qua Mã bảo mật.',
+            sender_id,
+            'PROFILE'
+        );
+
+        return jsonb_build_object('status', 'CONNECTED', 'message', 'Đã kết nối tự động thành công!');
+
+    else
+        -- B. Send Request (Notification Only)
+        -- UPDATED: Put Sender Name in Title for clarity
+        insert into notifications (user_id, type, title, message, related_entity_id, related_entity_type)
+        values (
+            target_profile.id,
+            'FRIEND_REQ',
+            sender_profile.name || ' muốn kết bạn',
+            sender_profile.name || ' muốn kết nối với bạn. (Mã: ' || target_unique_id || ')',
+            sender_id,
+            'PROFILE'
+        );
+
+        return jsonb_build_object('status', 'REQUEST_SENT', 'message', 'Đã gửi lời mời kết bạn. Chờ xác nhận.');
+    end if;
+end;
+$$;
+
+-- 11. RPC: ACCEPT FRIEND REQUEST
+create or replace function public.accept_friend_request(
+    notification_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    receiver_id uuid := auth.uid(); -- Me, the one accepting
+    sender_id uuid; -- The one who sent the request
+    notif_record notifications;
+    sender_profile profiles;
+    receiver_profile profiles;
+begin
+    -- 1. Fetch Notification to get Sender ID
+    select * into notif_record from notifications where id = notification_id and user_id = receiver_id;
+    
+    if not found then
+        return jsonb_build_object('status', 'ERROR', 'message', 'Không tìm thấy lời mời.');
+    end if;
+
+    sender_id := notif_record.related_entity_id; -- Ensure related_entity_id was stored as sender_id in connect_by_code
+
+    select * into sender_profile from profiles where id = sender_id;
+    select * into receiver_profile from profiles where id = receiver_id;
+
+    if not found then
+         return jsonb_build_object('status', 'ERROR', 'message', 'Người dùng không tồn tại.');
+    end if;
+
+    -- 2. Create Mutual Connections
+    
+    -- Insert for Receiver (Me) - adding Sender
+    insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+    values (
+        receiver_id,
+        sender_profile.name,
+        sender_profile.role,
+        sender_profile.avatar_url,
+        1, -- Tier 1
+        'APP',
+        ARRAY[]::text[]
+    );
+
+    -- Insert for Sender (Them) - adding Me
+    insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+    values (
+        sender_id,
+        receiver_profile.name,
+        receiver_profile.role,
+        receiver_profile.avatar_url,
+        1, -- Tier 1
+        'APP',
+        ARRAY[]::text[]
+    );
+
+    -- 3. Update Notification Status
+    update notifications 
+    set is_read = true, 
+        message = 'Bạn đã đồng ý kết bạn với ' || sender_profile.name
+    where id = notification_id;
+
+    -- 4. Notify Sender back
+    insert into notifications (user_id, type, title, message, related_entity_id, related_entity_type)
+    values (
+        sender_id,
+        'SYSTEM',
+        'Lời mời được chấp nhận!',
+        receiver_profile.name || ' đã đồng ý kết bạn với bạn.',
+        receiver_id,
+        'PROFILE'
+    );
+
+    return jsonb_build_object('status', 'SUCCESS', 'message', 'Đã kết bạn thành công!');
+end;
+$$;

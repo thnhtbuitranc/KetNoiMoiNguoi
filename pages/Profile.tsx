@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button, Card, Badge, Modal, Input } from '../components/ui';
-import { Camera, Share2, Settings, Smartphone, Mail, MapPin, Activity, QrCode, Lock, Globe, Eye, EyeOff, Save, Download, Copy, Briefcase, GraduationCap, Palette, Users } from 'lucide-react';
+import { Camera, Share2, Settings, Smartphone, Mail, MapPin, Activity, QrCode, Lock, Globe, Eye, EyeOff, Save, Download, Copy, Briefcase, GraduationCap, Palette, Users, HelpCircle, ExternalLink, AlertTriangle, Key, ShieldCheck } from 'lucide-react';
 import { Language } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -20,6 +20,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
   const [showQrModal, setShowQrModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [counts, setCounts] = useState({ connections: 0, memories: 0 });
+  const [currentUserId, setCurrentUserId] = useState<string>('');
   
   // File Input Refs
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -40,8 +41,17 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     skills: { value: "", privacy: 'PUBLIC' } as UserField,
     hobbies: { value: "", privacy: 'FRIENDS' } as UserField,
     bio: "",
-    tags: ["MEMBER"]
+    tags: ["MEMBER"],
+    uniqueId: "",
+    securityCode: ""
   });
+
+  const [editSecurityCode, setEditSecurityCode] = useState("");
+
+  const generateRandomId = () => {
+     // Generate 8 char random string (uppercase alphanumeric)
+     return Math.random().toString(36).substring(2, 10).toUpperCase();
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -50,6 +60,7 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
+                setCurrentUserId(user.id);
                 // Fetch Profile Data
                 const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
                 
@@ -72,6 +83,14 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                     // Parse Privacy Settings
                     const ps = data.privacy_settings || {};
                     
+                    // Check if unique_id needs generation
+                    let currentUniqueId = data.unique_id;
+                    if (!currentUniqueId) {
+                        currentUniqueId = generateRandomId();
+                        // Auto-save the new ID
+                        await supabase.from('profiles').update({ unique_id: currentUniqueId }).eq('id', user.id);
+                    }
+
                     setUserInfo(prev => ({
                         ...prev,
                         name: initialName,
@@ -88,8 +107,11 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                         skills: { value: data.skills || '', privacy: ps.skills || 'PUBLIC' },
                         hobbies: { value: data.hobbies || '', privacy: ps.hobbies || 'FRIENDS' },
                         address: { value: data.location || '', privacy: ps.address || 'CLOSE_FRIENDS' }, // Mapping address to location field for now
-                        tags: data.tags && data.tags.length > 0 ? data.tags : ['MEMBER']
+                        tags: data.tags && data.tags.length > 0 ? data.tags : ['MEMBER'],
+                        uniqueId: currentUniqueId,
+                        securityCode: data.security_code || ""
                     }));
+                    setEditSecurityCode(data.security_code || "");
                 } else {
                     // Initialize from Auth if no profile exists yet
                      setUserInfo(prev => ({
@@ -117,6 +139,12 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
           
           logDbOperation('Profile', 'Updating...', userInfo);
           
+          // Validate Security Code
+          if (editSecurityCode.length > 4) {
+              alert("Mã bảo mật tối đa 4 ký tự.");
+              return;
+          }
+
           // Construct Privacy Settings JSON
           const privacySettings = {
               email: userInfo.email.privacy,
@@ -143,12 +171,16 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
               tags: userInfo.tags,
               privacy_settings: privacySettings,
               
+              // Security
+              security_code: editSecurityCode,
+              
               updated_at: new Date().toISOString()
           };
           
           const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
           if (error) throw error;
           
+          setUserInfo(prev => ({ ...prev, securityCode: editSecurityCode }));
           logDbOperation('Profile', 'Update Success');
       } catch (e: any) {
           logDbOperation('Profile', 'Update Failed', null, e);
@@ -239,6 +271,27 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
       default: return '';
     }
   };
+  
+  // --- URL GENERATION LOGIC ---
+  const getCleanShareUrl = () => {
+     // Use Origin + Pathname to avoid any messy query parameters before the hash
+     const origin = window.location.origin;
+     const path = window.location.pathname; // This includes '/' or '/index.html'
+     
+     // Remove trailing slash if it exists to clean up
+     const cleanPath = path === '/' ? '' : path.replace(/\/$/, "");
+     
+     return `${origin}${cleanPath}/#/p/${currentUserId}`;
+  };
+
+  const shareLink = getCleanShareUrl();
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(shareLink)}&color=0f172a`;
+
+  // Check if likely in a private environment
+  const isPrivateEnv = window.location.hostname.includes('localhost') || 
+                       window.location.hostname.includes('127.0.0.1') || 
+                       window.location.hostname.includes('usercontent.goog') ||
+                       window.location.protocol === 'file:';
 
   // Helper component for Star Icon locally
   const StarIcon = ({size, className}: {size:number, className:string}) => (
@@ -367,6 +420,50 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
             )}
             
             <div className="space-y-6">
+               {/* Secure Connection Section - NEW */}
+               <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                  <h4 className="text-xs font-bold text-indigo-700 uppercase mb-3 flex items-center gap-2">
+                     <ShieldCheck size={16} /> Mã Kết Nối & Bảo Mật
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* ID */}
+                      <div>
+                         <label className="text-[10px] font-bold text-indigo-400 uppercase mb-1 block">ID Của Tôi (8 ký tự)</label>
+                         <div className="flex items-center gap-2">
+                            <code className="bg-white px-3 py-1.5 rounded border border-indigo-200 font-mono font-bold text-lg tracking-widest text-indigo-900 select-all">
+                                {userInfo.uniqueId || "LOADING"}
+                            </code>
+                            <button onClick={() => { navigator.clipboard.writeText(userInfo.uniqueId); alert('Copied ID!'); }} className="p-2 bg-white rounded border border-indigo-200 text-indigo-500 hover:text-indigo-700">
+                                <Copy size={16} />
+                            </button>
+                         </div>
+                         <p className="text-[10px] text-indigo-500 mt-1">Chia sẻ ID này để bạn bè tìm thấy bạn.</p>
+                      </div>
+
+                      {/* Code */}
+                      <div>
+                         <label className="text-[10px] font-bold text-indigo-400 uppercase mb-1 block">Mã Bảo Mật (Tự động kết bạn)</label>
+                         {isEditing ? (
+                            <Input 
+                                value={editSecurityCode} 
+                                onChange={(e) => setEditSecurityCode(e.target.value.toUpperCase())}
+                                placeholder="VD: 1234, AB..."
+                                maxLength={4}
+                                className="font-mono text-center tracking-widest uppercase font-bold text-indigo-900 border-indigo-200 focus:border-indigo-500 bg-white"
+                            />
+                         ) : (
+                            <div className="flex items-center gap-2">
+                                <div className="bg-white px-3 py-1.5 rounded border border-indigo-200 font-mono font-bold text-lg text-indigo-900 min-w-[80px] text-center">
+                                    {userInfo.securityCode ? userInfo.securityCode : <span className="text-slate-300 font-normal text-xs italic">Chưa set</span>}
+                                </div>
+                                <span className="text-xs text-indigo-400">(Tối đa 4 ký tự)</span>
+                            </div>
+                         )}
+                         <p className="text-[10px] text-indigo-500 mt-1">Nếu bạn bè nhập đúng ID + Mã này, họ sẽ được kết bạn tự động.</p>
+                      </div>
+                  </div>
+               </div>
+
                {/* Contact Section */}
                <div>
                   <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Contact & Basic Info</h4>
@@ -588,21 +685,53 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
       <Modal 
         isOpen={showQrModal} 
         onClose={() => setShowQrModal(false)} 
-        title="Share Your Profile"
+        title="Mã QR Cá Nhân"
       >
         <div className="text-center space-y-6">
-          <div className="bg-white p-4 rounded-xl inline-block shadow-lg border border-slate-100">
-             <QrCode size={200} className="text-slate-900" />
+          <div className="bg-white p-4 rounded-xl inline-block shadow-lg border border-slate-100 relative">
+             <img src={qrCodeUrl} alt="QR Code" className="w-52 h-52 object-contain rounded-lg mb-2" />
+             {isPrivateEnv && (
+                <div className="absolute inset-0 bg-white/80 flex items-center justify-center text-xs font-bold text-red-500 p-4 text-center border-2 border-red-100 rounded-xl">
+                    ⚠️ Môi trường Private/Local.<br/>QR này có thể không hoạt động trên thiết bị khác.
+                </div>
+             )}
           </div>
-          <p className="text-slate-600 text-sm">
-             Share this QR code or link with new connections. <br/>They will see your <strong>Public</strong> info instantly.
-          </p>
+          
+          <div className="space-y-3">
+            <h3 className="text-slate-900 font-bold text-lg">Cách hoạt động</h3>
+            <ol className="text-sm text-slate-600 text-left space-y-2 list-decimal pl-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <li>Người khác sử dụng camera điện thoại để quét mã này.</li>
+                <li>Họ sẽ được dẫn đến trang <strong>Hồ sơ công khai</strong> của bạn.</li>
+                <li>Họ bấm <strong>"Thêm vào danh bạ"</strong> để lưu thông tin.</li>
+            </ol>
+            
+            {/* Warning Box */}
+            {isPrivateEnv && (
+               <div className="flex items-start gap-2 bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-left">
+                  <AlertTriangle size={16} className="text-yellow-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-yellow-700">
+                     <strong>Lưu ý:</strong> Bạn đang chạy trên môi trường Development/Preview (Localhost hoặc Cloud Shell). Link này ({window.location.host}) có thể không truy cập được từ bên ngoài hoặc yêu cầu đăng nhập tài khoản Google của bạn.
+                  </p>
+               </div>
+            )}
+
+            <div className="bg-slate-50 p-2 rounded border border-slate-200 flex items-center justify-between text-xs text-slate-500 gap-2">
+                <span className="truncate flex-1 text-left font-mono">{shareLink}</span>
+                <button onClick={() => window.open(shareLink, '_blank')} className="text-primary-600 font-bold whitespace-nowrap hover:underline">
+                    Thử Link
+                </button>
+            </div>
+          </div>
+
           <div className="flex gap-3">
-             <Button fullWidth variant="secondary" className="gap-2">
-                <Download size={18} /> Save Image
+             <Button fullWidth variant="secondary" className="gap-2" onClick={() => window.open(qrCodeUrl, '_blank')}>
+                <Download size={18} /> Tải Ảnh
              </Button>
-             <Button fullWidth className="gap-2">
-                <Copy size={18} /> Copy Link
+             <Button fullWidth className="gap-2" onClick={() => {
+                 navigator.clipboard.writeText(shareLink);
+                 alert("Đã sao chép liên kết!");
+             }}>
+                <Copy size={18} /> Sao chép Link
              </Button>
           </div>
         </div>

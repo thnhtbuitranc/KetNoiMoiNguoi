@@ -23,6 +23,8 @@ export interface UserProfile {
   avatar: string;
   bio: string;
   qrCode: string; // Base64 or URL
+  uniqueId?: string; // 8-char random ID
+  securityCode?: string; // 4-char manual code
   publicInfo: {
     email?: string;
     socials?: string[];
@@ -70,11 +72,11 @@ export interface DriveItem {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'BIRTHDAY' | 'REMINDER' | 'SYSTEM' | 'INTERACTION';
+  type: 'BIRTHDAY' | 'REMINDER' | 'SYSTEM' | 'INTERACTION' | 'FRIEND_REQ';
   title: string;
   message?: string;
   relatedEntityId?: string;
-  relatedEntityType?: 'EVENT' | 'CONNECTION' | 'MEMORY';
+  relatedEntityType?: 'EVENT' | 'CONNECTION' | 'MEMORY' | 'PROFILE';
   isRead: boolean;
   createdAt: string;
 }

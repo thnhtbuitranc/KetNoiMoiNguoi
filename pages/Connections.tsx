@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud, ShieldCheck, Key } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -37,6 +37,13 @@ const normalizeString = (str: string) => {
   return str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase() : "";
 };
 
+// Helper to check for system tags
+const isSystemTag = (tag: string) => {
+    if (!tag) return false;
+    return tag.startsWith('LINKED_ID:') || 
+           ['ACCEPTED_REQ', 'REQ_ACCEPTED', 'AUTO_CONNECTED', 'REQ_ACCEPTEP'].includes(tag);
+};
+
 const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +71,12 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
       date: new Date().toISOString().split('T')[0],
       type: 'NOTE'
   });
+
+  // --- CONNECT BY CODE MODAL ---
+  const [isConnectCodeModalOpen, setIsConnectCodeModalOpen] = useState(false);
+  const [connectId, setConnectId] = useState("");
+  const [connectSecurityCode, setConnectSecurityCode] = useState("");
+  const [connecting, setConnecting] = useState(false);
 
   // Form State
   const [newConnection, setNewConnection] = useState<Partial<Connection> & { tagsString: string }>({
@@ -95,7 +108,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
           lastInteraction: item.last_interaction_date,
           source: item.source || 'MANUAL',
           memoriesCount: 0, // Need join for real count
-          tags: item.tags || []
+          tags: (item.tags || []).filter((t: string) => !isSystemTag(t))
        }));
 
        setConnections(formattedData);
@@ -149,6 +162,43 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
        logDbOperation('Connections', 'Insert Failed', null, err);
        alert("Lỗi thêm mới: " + err.message);
     }
+  };
+
+  // --- 2.5 CONNECT BY CODE ---
+  const handleConnectByCode = async () => {
+      if (!connectId.trim()) return;
+      setConnecting(true);
+      try {
+          logDbOperation('Connections', 'Connecting by code...', { id: connectId, code: connectSecurityCode });
+          
+          const { data, error } = await supabase.rpc('connect_by_code', {
+              target_unique_id: connectId.trim().toUpperCase(),
+              provided_code: connectSecurityCode.trim().toUpperCase()
+          });
+
+          if (error) throw error;
+
+          console.log("Connect Result:", data);
+
+          if (data.status === 'CONNECTED') {
+              alert("Kết nối tự động thành công! ✅\nBạn đã được thêm vào danh sách bạn bè.");
+              fetchConnections();
+              setIsConnectCodeModalOpen(false);
+              setConnectId("");
+              setConnectSecurityCode("");
+          } else if (data.status === 'REQUEST_SENT') {
+              alert("Lời mời kết bạn đã được gửi. 📩\nNgười dùng này cần xác nhận yêu cầu của bạn vì mã bảo mật chưa chính xác hoặc không được cung cấp.");
+              setIsConnectCodeModalOpen(false);
+          } else {
+              alert("Lỗi: " + data.message);
+          }
+
+      } catch (err: any) {
+          logDbOperation('Connections', 'Connect Failed', null, err);
+          alert("Lỗi kết nối: " + err.message);
+      } finally {
+          setConnecting(false);
+      }
   };
 
   // --- 3. EDIT DATA ---
@@ -579,6 +629,12 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                   onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                >
                   <Filter size={18} /> Lọc
+               </Button>
+               <Button 
+                    className="gap-2 flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20" 
+                    onClick={() => setIsConnectCodeModalOpen(true)}
+               >
+                  <ShieldCheck size={18} /> Kết bạn bằng Mã
                </Button>
                <Button className="gap-2 flex-1 md:flex-none bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-500/20" onClick={() => setIsAddModalOpen(true)}>
                   <Plus size={18} /> Thêm mới
@@ -1071,6 +1127,60 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
               </Button>
            </div>
         </div>
+      </Modal>
+
+      {/* NEW: Connect By Code Modal */}
+      <Modal isOpen={isConnectCodeModalOpen} onClose={() => setIsConnectCodeModalOpen(false)} title="Kết bạn bằng Mã">
+          <div className="space-y-6">
+              <div className="bg-indigo-50 p-4 rounded-xl text-center border border-indigo-100">
+                  <ShieldCheck className="mx-auto text-indigo-500 mb-2" size={32} />
+                  <p className="text-sm text-indigo-800">
+                      Nhập ID của bạn bè để gửi lời mời. <br/>
+                      Nếu có <strong>Mã Bảo Mật</strong>, hai bạn sẽ được kết nối ngay lập tức!
+                  </p>
+              </div>
+
+              <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">ID Người dùng (8 ký tự) *</label>
+                  <div className="relative">
+                      <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <Input 
+                          value={connectId} 
+                          onChange={(e) => setConnectId(e.target.value.toUpperCase())}
+                          placeholder="VD: 24CAJ245"
+                          className="pl-10 font-mono tracking-wide"
+                          maxLength={8}
+                      />
+                  </div>
+              </div>
+
+              <div>
+                  <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Mã Bảo Mật (Tùy chọn)</label>
+                  <div className="relative">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <Input 
+                          value={connectSecurityCode} 
+                          onChange={(e) => setConnectSecurityCode(e.target.value.toUpperCase())}
+                          placeholder="VD: AC23"
+                          className="pl-10 font-mono tracking-wide"
+                          maxLength={4}
+                      />
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                      Nhập đúng mã để bỏ qua bước chờ xác nhận.
+                  </p>
+              </div>
+
+              <div className="pt-2">
+                  <Button fullWidth onClick={handleConnectByCode} disabled={connecting} className="bg-indigo-600 hover:bg-indigo-700">
+                      {connecting ? (
+                          <span className="flex items-center gap-2">
+                              <Loader2 className="animate-spin" size={16} /> Đang xử lý...
+                          </span>
+                      ) : 'Kết Nối Ngay'}
+                  </Button>
+              </div>
+          </div>
       </Modal>
 
     </div>
