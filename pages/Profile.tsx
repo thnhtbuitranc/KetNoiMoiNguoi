@@ -15,17 +15,26 @@ interface UserField {
   privacy: PrivacyLevel;
 }
 
+// Structure for detailed school info
+interface SchoolInfo {
+    name: string;
+    classes: string; // "1/1, 2/1, 3/2"
+    teachers: string; // "Co Lan, Thay Hung"
+    years: string; // "1999-2004"
+}
+
 // Extended Profile Structure
 interface DetailedInfo {
-    // Education
-    preschool?: string;
-    primarySchool?: string;
-    secondarySchool?: string;
-    highSchool?: string;
+    // Education - Now Objects
+    preschool?: SchoolInfo;
+    primarySchool?: SchoolInfo;
+    secondarySchool?: SchoolInfo;
+    highSchool?: SchoolInfo;
+    university?: SchoolInfo;
+    
+    // Legacy/Simple fields
     highSchoolStream?: string; // Ban Tự nhiên/Xã hội
-    university?: string;
     major?: string;
-    teachers?: string; // Giáo viên ấn tượng
     
     // Work
     company?: string;
@@ -45,6 +54,83 @@ interface DetailedInfo {
     clubs?: string; // CLB
     games?: string;
 }
+
+// --- Sub-component for School Input (Moved OUTSIDE to prevent re-render focus loss) ---
+const SchoolInputBlock = ({ 
+    label, 
+    schoolKey, 
+    data,
+    isEditing,
+    onUpdate
+}: { 
+    label: string, 
+    schoolKey: keyof DetailedInfo, 
+    data?: SchoolInfo | string, // Legacy support for string
+    isEditing: boolean,
+    onUpdate: (key: keyof DetailedInfo, field: keyof SchoolInfo, val: string) => void
+}) => {
+    // Normalize data to object if it's a string or undefined
+    const safeData: SchoolInfo = (typeof data === 'object' && data !== null) 
+        ? data 
+        : { name: typeof data === 'string' ? data : '', classes: '', teachers: '', years: '' };
+
+    if (!isEditing) {
+        if (!safeData.name) return null;
+        return (
+            <div className="mb-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0 last:mb-0">
+                <div className="flex justify-between items-start">
+                    <span className="font-bold text-slate-800 text-sm">{label}</span>
+                    {safeData.years && (
+                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-bold">
+                            {safeData.years}
+                        </span>
+                    )}
+                </div>
+                <div className="text-sm text-slate-600 font-medium mt-1">{safeData.name}</div>
+                {(safeData.classes || safeData.teachers) && (
+                    <div className="mt-2 text-xs text-slate-500 bg-slate-50 p-2 rounded-lg space-y-1">
+                        {safeData.classes && <div><span className="font-semibold">Lớp:</span> {safeData.classes}</div>}
+                        {safeData.teachers && <div><span className="font-semibold">GV:</span> {safeData.teachers}</div>}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4">
+            <label className="text-xs font-bold text-slate-700 uppercase mb-2 block">{label}</label>
+            <div className="space-y-2">
+                <Input 
+                    placeholder="Tên trường..." 
+                    value={safeData.name}
+                    onChange={(e) => onUpdate(schoolKey, 'name', e.target.value)}
+                    className="bg-white"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                    <Input 
+                        placeholder="Lớp (VD: 1/1, 2/3...)" 
+                        value={safeData.classes}
+                        onChange={(e) => onUpdate(schoolKey, 'classes', e.target.value)}
+                        className="bg-white text-xs"
+                    />
+                    <Input 
+                        placeholder="Niên khóa (VD: 1999-2003)" 
+                        value={safeData.years}
+                        onChange={(e) => onUpdate(schoolKey, 'years', e.target.value)}
+                        className="bg-white text-xs"
+                    />
+                </div>
+                <Input 
+                    placeholder="Tên Giáo Viên (Cô Lan, Thầy Hùng...)" 
+                    value={safeData.teachers}
+                    onChange={(e) => onUpdate(schoolKey, 'teachers', e.target.value)}
+                    className="bg-white text-xs"
+                />
+            </div>
+        </div>
+    );
+};
 
 const Profile: React.FC<ProfileProps> = ({ lang }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -235,19 +321,26 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     }));
   };
 
-  const handleValueChange = (field: keyof typeof userInfo, newValue: string) => {
-    setUserInfo(prev => ({
-      ...prev,
-      [field]: { ...prev[field as keyof typeof prev] as UserField, value: newValue }
-    }));
-  };
-
-  // Helper for Detailed Info Update
-  const updateDetail = (key: keyof DetailedInfo, val: string) => {
+  // Helper for Detailed Info Update (Generic)
+  const updateDetail = (key: keyof DetailedInfo, val: any) => {
       setUserInfo(prev => ({
           ...prev,
           detailedInfo: { ...prev.detailedInfo, [key]: val }
       }));
+  };
+
+  // Helper for Updating School Object
+  const updateSchool = (key: keyof DetailedInfo, field: keyof SchoolInfo, val: string) => {
+      setUserInfo(prev => {
+          const currentSchool = (prev.detailedInfo[key] as SchoolInfo) || { name: '', classes: '', teachers: '', years: '' };
+          return {
+              ...prev,
+              detailedInfo: { 
+                  ...prev.detailedInfo, 
+                  [key]: { ...currentSchool, [field]: val } 
+              }
+          };
+      });
   };
   
   const triggerAvatarUpload = () => {
@@ -322,13 +415,9 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
   
   // --- URL GENERATION LOGIC ---
   const getCleanShareUrl = () => {
-     // Use Origin + Pathname to avoid any messy query parameters before the hash
      const origin = window.location.origin;
-     const path = window.location.pathname; // This includes '/' or '/index.html'
-     
-     // Remove trailing slash if it exists to clean up
+     const path = window.location.pathname; 
      const cleanPath = path === '/' ? '' : path.replace(/\/$/, "");
-     
      return `${origin}${cleanPath}/#/p/${currentUserId}`;
   };
 
@@ -341,7 +430,6 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                        window.location.hostname.includes('usercontent.goog') ||
                        window.location.protocol === 'file:';
 
-  // Helper component for Star Icon locally
   const StarIcon = ({size, className}: {size:number, className:string}) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} xmlns="http://www.w3.org/2000/svg"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"/></svg>
   );
@@ -470,36 +558,53 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
             {/* EXPANDED DETAILS SECTION */}
             <div className="space-y-8">
                 
-                {/* 1. Education Group */}
+                {/* 1. Education Group - UPDATED WITH STRUCTURED INPUTS */}
                 <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
                     <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
                         <GraduationCap className="text-indigo-600" size={18} />
                         <h4 className="font-bold text-slate-800 text-sm">Học Vấn & Trường Lớp</h4>
                     </div>
-                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="md:col-span-2">
+                            <p className="text-xs text-slate-400 mb-4 italic">Nhập chi tiết Tên lớp (ví dụ 1/2, 9/4) và Tên giáo viên để dễ dàng tìm thấy bạn cũ.</p>
+                        </div>
+                        
+                        <SchoolInputBlock label="Mầm non" schoolKey="preschool" data={userInfo.detailedInfo?.preschool} isEditing={isEditing} onUpdate={updateSchool} />
+                        <SchoolInputBlock label="Tiểu học (Cấp 1)" schoolKey="primarySchool" data={userInfo.detailedInfo?.primarySchool} isEditing={isEditing} onUpdate={updateSchool} />
+                        <SchoolInputBlock label="Trung học cơ sở (Cấp 2)" schoolKey="secondarySchool" data={userInfo.detailedInfo?.secondarySchool} isEditing={isEditing} onUpdate={updateSchool} />
+                        <SchoolInputBlock label="Trung học phổ thông (Cấp 3)" schoolKey="highSchool" data={userInfo.detailedInfo?.highSchool} isEditing={isEditing} onUpdate={updateSchool} />
+                        
+                        {/* High School Stream - Simple Field */}
                         {isEditing ? (
-                            <>
-                                <div><label className="text-xs text-slate-500 block mb-1">Mầm non</label><Input value={userInfo.detailedInfo?.preschool || ''} onChange={e => updateDetail('preschool', e.target.value)} placeholder="Tên trường..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 1 (Tiểu học)</label><Input value={userInfo.detailedInfo?.primarySchool || ''} onChange={e => updateDetail('primarySchool', e.target.value)} placeholder="Tên trường..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 2 (THCS)</label><Input value={userInfo.detailedInfo?.secondarySchool || ''} onChange={e => updateDetail('secondarySchool', e.target.value)} placeholder="Tên trường..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Cấp 3 (THPT)</label><Input value={userInfo.detailedInfo?.highSchool || ''} onChange={e => updateDetail('highSchool', e.target.value)} placeholder="Tên trường..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Ban học (C3)</label><Input value={userInfo.detailedInfo?.highSchoolStream || ''} onChange={e => updateDetail('highSchoolStream', e.target.value)} placeholder="VD: Ban A, Tự nhiên..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Đại học / CĐ</label><Input value={userInfo.detailedInfo?.university || ''} onChange={e => updateDetail('university', e.target.value)} placeholder="Tên trường..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Chuyên ngành</label><Input value={userInfo.detailedInfo?.major || ''} onChange={e => updateDetail('major', e.target.value)} placeholder="VD: CNTT..." /></div>
-                                <div><label className="text-xs text-slate-500 block mb-1">Giáo viên ấn tượng</label><Input value={userInfo.detailedInfo?.teachers || ''} onChange={e => updateDetail('teachers', e.target.value)} placeholder="Thầy/Cô..." /></div>
-                            </>
-                        ) : (
-                            <div className="col-span-2 text-sm text-slate-600 grid grid-cols-1 md:grid-cols-2 gap-y-2 gap-x-8">
-                                {userInfo.detailedInfo?.preschool && <div><span className="font-semibold text-slate-900">Mầm non:</span> {userInfo.detailedInfo.preschool}</div>}
-                                {userInfo.detailedInfo?.primarySchool && <div><span className="font-semibold text-slate-900">Cấp 1:</span> {userInfo.detailedInfo.primarySchool}</div>}
-                                {userInfo.detailedInfo?.secondarySchool && <div><span className="font-semibold text-slate-900">Cấp 2:</span> {userInfo.detailedInfo.secondarySchool}</div>}
-                                {userInfo.detailedInfo?.highSchool && <div><span className="font-semibold text-slate-900">Cấp 3:</span> {userInfo.detailedInfo.highSchool}</div>}
-                                {userInfo.detailedInfo?.highSchoolStream && <div><span className="font-semibold text-slate-900">Ban:</span> {userInfo.detailedInfo.highSchoolStream}</div>}
-                                {userInfo.detailedInfo?.university && <div><span className="font-semibold text-slate-900">Đại học:</span> {userInfo.detailedInfo.university}</div>}
-                                {userInfo.detailedInfo?.major && <div><span className="font-semibold text-slate-900">Ngành:</span> {userInfo.detailedInfo.major}</div>}
-                                {userInfo.detailedInfo?.teachers && <div><span className="font-semibold text-slate-900">Giáo viên:</span> {userInfo.detailedInfo.teachers}</div>}
-                                {(!userInfo.detailedInfo?.highSchool && !userInfo.detailedInfo?.university) && <span className="text-slate-400 italic">Chưa có thông tin chi tiết.</span>}
+                            <div>
+                                <label className="text-xs font-bold text-slate-700 uppercase mb-2 block">Ban học (Cấp 3)</label>
+                                <Input value={userInfo.detailedInfo?.highSchoolStream || ''} onChange={e => updateDetail('highSchoolStream', e.target.value)} placeholder="VD: Ban A, Tự nhiên..." />
                             </div>
+                        ) : userInfo.detailedInfo?.highSchoolStream && (
+                            <div className="mb-3">
+                                <span className="font-bold text-slate-800 text-sm block">Ban học</span>
+                                <span className="text-sm text-slate-600">{userInfo.detailedInfo.highSchoolStream}</span>
+                            </div>
+                        )}
+
+                        <SchoolInputBlock label="Đại học / Cao đẳng" schoolKey="university" data={userInfo.detailedInfo?.university} isEditing={isEditing} onUpdate={updateSchool} />
+                        
+                        {/* Major - Simple Field */}
+                        {isEditing ? (
+                            <div>
+                                <label className="text-xs font-bold text-slate-700 uppercase mb-2 block">Chuyên ngành</label>
+                                <Input value={userInfo.detailedInfo?.major || ''} onChange={e => updateDetail('major', e.target.value)} placeholder="VD: CNTT..." />
+                            </div>
+                        ) : userInfo.detailedInfo?.major && (
+                            <div className="mb-3">
+                                <span className="font-bold text-slate-800 text-sm block">Chuyên ngành</span>
+                                <span className="text-sm text-slate-600">{userInfo.detailedInfo.major}</span>
+                            </div>
+                        )}
+                        
+                        {/* Empty State */}
+                        {!isEditing && Object.keys(userInfo.detailedInfo || {}).length === 0 && (
+                            <div className="col-span-2 text-center text-slate-400 italic text-sm">Chưa có thông tin học vấn.</div>
                         )}
                     </div>
                 </div>

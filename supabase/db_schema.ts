@@ -74,13 +74,14 @@ end $$;
 -- Enable RLS
 alter table public.profiles enable row level security;
 
--- STRICT POLICIES: Only Owner can Select/Update/Insert raw table
+-- STRICT POLICIES
 drop policy if exists "Public profiles are viewable by everyone" on profiles;
-
--- NEW FIX: Drop the policy we are about to create to prevent 42710 error
 drop policy if exists "Users can view own profile" on profiles;
-create policy "Users can view own profile" 
-  on profiles for select using (auth.uid() = id);
+drop policy if exists "Authenticated users can view profiles" on profiles; -- Fixed: Added drop to prevent error 42710
+
+-- ALLOW AUTHENTICATED USERS TO VIEW ALL PROFILES (Needed for Suggestion/Search)
+create policy "Authenticated users can view profiles" 
+  on profiles for select using (auth.role() = 'authenticated');
 
 drop policy if exists "Users can insert their own profile" on profiles;
 create policy "Users can insert their own profile" 
@@ -91,8 +92,7 @@ create policy "Users can update their own profile"
   on profiles for update using (auth.uid() = id);
 
 
--- SECURE VIEW FUNCTION
--- This function allows others to view a profile but masks data based on privacy_settings
+-- SECURE VIEW FUNCTION (Optional, for stricter partial data access)
 create or replace function public.get_profile_view(target_id uuid)
 returns jsonb
 language plpgsql
@@ -130,42 +130,31 @@ begin
   );
 
   -- 4. Conditionally Add Fields based on Settings
-  
-  -- Logic: If 'PUBLIC', show. 
-  -- If 'FRIENDS' or 'CLOSE_FRIENDS', currently treated as PRIVATE (hidden) 
-  -- because we don't have a bidirectional friend graph yet.
-
-  -- Email
   setting := coalesce(privacy_settings->>'email', 'PRIVATE');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('email', target_profile.email);
   end if;
 
-  -- Job
   setting := coalesce(privacy_settings->>'job', 'PUBLIC');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('job', target_profile.job);
   end if;
 
-  -- Education
   setting := coalesce(privacy_settings->>'education', 'FRIENDS');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('education', target_profile.education);
   end if;
 
-  -- Skills
   setting := coalesce(privacy_settings->>'skills', 'PUBLIC');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('skills', target_profile.skills);
   end if;
 
-  -- Hobbies
   setting := coalesce(privacy_settings->>'hobbies', 'FRIENDS');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('hobbies', target_profile.hobbies);
   end if;
 
-  -- Location (Mapped from 'address' setting)
   setting := coalesce(privacy_settings->>'address', 'CLOSE_FRIENDS');
   if setting = 'PUBLIC' then
     result := result || jsonb_build_object('location', target_profile.location);
@@ -342,9 +331,24 @@ create table if not exists public.notifications (
 
 alter table public.notifications enable row level security;
 
+-- Split policies to allow inserting notifications for other users (e.g. Friend Requests)
 drop policy if exists "Users can CRUD their own notifications" on notifications;
-create policy "Users can CRUD their own notifications" 
-  on notifications for all using (auth.uid() = user_id);
+
+drop policy if exists "Users can view own notifications" on notifications;
+create policy "Users can view own notifications" 
+  on notifications for select using (auth.uid() = user_id);
+
+drop policy if exists "Users can update own notifications" on notifications;
+create policy "Users can update own notifications" 
+  on notifications for update using (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own notifications" on notifications;
+create policy "Users can delete own notifications" 
+  on notifications for delete using (auth.uid() = user_id);
+
+drop policy if exists "Authenticated users can insert notifications" on notifications;
+create policy "Authenticated users can insert notifications" 
+  on notifications for insert with check (auth.role() = 'authenticated');
 
 -- 10. RPC: CONNECT BY CODE
 create or replace function public.connect_by_code(
@@ -426,7 +430,6 @@ begin
 
     else
         -- B. Send Request (Notification Only)
-        -- UPDATED: Put Sender Name in Title for clarity
         insert into notifications (user_id, type, title, message, related_entity_id, related_entity_type)
         values (
             target_profile.id,
@@ -520,4 +523,3 @@ begin
     return jsonb_build_object('status', 'SUCCESS', 'message', 'Đã kết bạn thành công!');
 end;
 $$;
-`;
