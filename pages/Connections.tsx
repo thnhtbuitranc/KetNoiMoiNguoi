@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud, ShieldCheck, Key } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud, ShieldCheck, Key, ChevronDown } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
 
@@ -60,6 +60,9 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   
+  // Add Menu Dropdown
+  const [showAddMenu, setShowAddMenu] = useState(false);
+
   // --- MEMORY MODAL STATE ---
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [selectedConnectionForMemory, setSelectedConnectionForMemory] = useState<Connection | null>(null);
@@ -569,7 +572,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500" onClick={() => setShowAddMenu(false)}>
       
       {/* Page Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -630,15 +633,41 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                >
                   <Filter size={18} /> Lọc
                </Button>
-               <Button 
-                    className="gap-2 flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-500/20" 
-                    onClick={() => setIsConnectCodeModalOpen(true)}
-               >
-                  <ShieldCheck size={18} /> Kết bạn bằng Mã
-               </Button>
-               <Button className="gap-2 flex-1 md:flex-none bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-500/20" onClick={() => setIsAddModalOpen(true)}>
-                  <Plus size={18} /> Thêm mới
-               </Button>
+
+               {/* Add New Dropdown Trigger */}
+               <div className="relative flex-1 md:flex-none">
+                   <Button 
+                        className="gap-2 w-full bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-500/20" 
+                        onClick={(e) => { e.stopPropagation(); setShowAddMenu(!showAddMenu); }}
+                   >
+                        <Plus size={18} /> Thêm mới
+                   </Button>
+                   
+                   {showAddMenu && (
+                       <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 z-10 p-1 animate-in fade-in zoom-in-95 duration-100">
+                            <button 
+                                onClick={() => { setIsConnectCodeModalOpen(true); setShowAddMenu(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg text-left font-medium transition-colors"
+                            >
+                                <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded-md"><ShieldCheck size={16} /></div>
+                                <div>
+                                    <span className="block">Kết nối bằng Mã</span>
+                                    <span className="text-[10px] text-slate-400 font-normal">Tự động kết bạn</span>
+                                </div>
+                            </button>
+                            <button 
+                                onClick={() => { setIsAddModalOpen(true); setShowAddMenu(false); }}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-slate-900 rounded-lg text-left font-medium transition-colors"
+                            >
+                                <div className="p-1.5 bg-slate-100 text-slate-500 rounded-md"><Edit2 size={16} /></div>
+                                <div>
+                                    <span className="block">Thủ công</span>
+                                    <span className="text-[10px] text-slate-400 font-normal">Tự nhập thông tin</span>
+                                </div>
+                            </button>
+                       </div>
+                   )}
+               </div>
             </div>
          </div>
 

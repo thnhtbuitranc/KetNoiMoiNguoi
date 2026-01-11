@@ -64,6 +64,11 @@ begin
   if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'security_code') then
     alter table public.profiles add column security_code text;
   end if;
+  
+  -- NEW: Birthday
+  if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'birthday') then
+    alter table public.profiles add column birthday text;
+  end if;
 
   -- NEW: Detailed Info (JSONB) for granular filtering (Schools, Hometown, Games, etc.)
   if not exists (select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'detailed_info') then
@@ -77,7 +82,7 @@ alter table public.profiles enable row level security;
 -- STRICT POLICIES
 drop policy if exists "Public profiles are viewable by everyone" on profiles;
 drop policy if exists "Users can view own profile" on profiles;
-drop policy if exists "Authenticated users can view profiles" on profiles; -- Fixed: Added drop to prevent error 42710
+drop policy if exists "Authenticated users can view profiles" on profiles; 
 
 -- ALLOW AUTHENTICATED USERS TO VIEW ALL PROFILES (Needed for Suggestion/Search)
 create policy "Authenticated users can view profiles" 
