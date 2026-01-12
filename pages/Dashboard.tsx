@@ -27,8 +27,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   // Suggestion State
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
-
+  
   // View Profile State
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
 
@@ -46,18 +45,29 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        // 1. Fetch Stats (Tier Distribution)
-        const { data: connData, error: connError } = await supabase.from('connections').select('tier, tags');
-        let connectedIds: string[] = []; // Track who is already connected
+        // 1. Fetch Stats (Tier Distribution) & Connected IDs & Names
+        // Added 'name' to selection to filter by name as well
+        const { data: connData, error: connError } = await supabase.from('connections').select('tier, tags, linked_user_id, name');
+        let connectedIds: string[] = []; // Track who is already connected by ID
+        let connectedNames: string[] = []; // Track who is connected by Name
 
         if (!connError && connData) {
             setTotalConnections(connData.length);
             const tiers = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
             connData.forEach((c: any) => {
                if (tiers[c.tier as keyof typeof tiers] !== undefined) tiers[c.tier as keyof typeof tiers]++;
-               // Extract linked IDs if available in tags or just assume we fetch connections with linked_user_id (if schema supported, but here we use manual match)
-               // For suggestions, we really need the profile IDs of people we are connected to.
-               // Currently 'connections' table stores 'user_id' (me) and 'name', not necessarily linking to another profile ID unless 'tags' has LINKED_ID.
+               
+               // Add linked_user_id to exclusion list
+               if (c.linked_user_id) {
+                   connectedIds.push(c.linked_user_id);
+               }
+
+               // Add Name to exclusion list (to handle duplicate profiles or unlinked duplicates)
+               if (c.name) {
+                   connectedNames.push(normalize(c.name));
+               }
+
+               // Extract legacy linked IDs from tags
                if (c.tags) {
                    c.tags.forEach((t: string) => {
                        if (t.startsWith('LINKED_ID:')) connectedIds.push(t.split(':')[1]);
@@ -106,13 +116,13 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         }
 
         // 3. Find Suggestions (People You May Know)
-        findSuggestions(user.id, connectedIds);
+        findSuggestions(user.id, connectedIds, connectedNames);
      };
 
      fetchData();
   }, []);
 
-  const findSuggestions = async (myId: string, connectedIds: string[]) => {
+  const findSuggestions = async (myId: string, connectedIds: string[], connectedNames: string[]) => {
       setLoadingSuggestions(true);
       try {
           // A. Get My Detailed Info
@@ -133,8 +143,11 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
           const results: Suggestion[] = [];
 
           candidates.forEach(candidate => {
-              // Skip if already connected
+              // 1. Skip if already connected by ID
               if (connectedIds.includes(candidate.id)) return;
+              
+              // 2. Skip if Name matches an existing connection (Heuristic to avoid duplicates)
+              if (candidate.name && connectedNames.includes(normalize(candidate.name))) return;
 
               let score = 0;
               const reasons: string[] = [];
@@ -241,7 +254,8 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
 
           if (error) throw error;
 
-          setSentRequests(prev => new Set(prev).add(targetId));
+          // Remove the suggestion immediately from the list
+          setSuggestions(prev => prev.filter(s => s.id !== targetId));
           alert(`Đã gửi lời mời đến ${targetName}!`);
 
       } catch (err: any) {
@@ -403,20 +417,14 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                               </div>
                           </div>
                           <div>
-                              {sentRequests.has(person.id) ? (
-                                  <Button size="sm" disabled className="bg-green-50 text-green-600 border-none shadow-none px-3">
-                                      <CheckCircle size={16} />
-                                  </Button>
-                              ) : (
-                                  <Button 
-                                    size="sm" 
-                                    className="px-3" 
-                                    onClick={(e) => { e.stopPropagation(); handleSendRequest(person.id, person.name); }} 
-                                    title="Gửi lời mời kết bạn"
-                                  >
-                                      <UserPlus size={16} />
-                                  </Button>
-                              )}
+                              <Button 
+                                size="sm" 
+                                className="px-3" 
+                                onClick={(e) => { e.stopPropagation(); handleSendRequest(person.id, person.name); }} 
+                                title="Gửi lời mời kết bạn"
+                              >
+                                  <UserPlus size={16} />
+                              </Button>
                           </div>
                       </Card>
                   ))}
