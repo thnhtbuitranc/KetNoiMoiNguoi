@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Badge, Input, Modal } from '../components/ui';
-import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud, ShieldCheck, Key, ChevronDown } from 'lucide-react';
+import { Search, Filter, Plus, Grid as GridIcon, List as ListIcon, MoreHorizontal, Phone, MapPin, Star, Calendar, RefreshCw, Check, Edit2, UserPlus, Globe, Tag, X, Activity, Zap, Sun, Loader2, Camera, StickyNote, UploadCloud, ShieldCheck, Key, ChevronDown, Link as LinkIcon } from 'lucide-react';
 import { Language, RelationshipTier, Connection } from '../types';
 import { supabase, logDbOperation } from '../services/supabase';
+import UserProfileModal from '../components/UserProfileModal';
 
 interface ConnectionsProps {
   lang: Language;
@@ -60,6 +61,9 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   
+  // VIEW USER PROFILE MODAL
+  const [viewingProfile, setViewingProfile] = useState<Connection | null>(null);
+  
   // Add Menu Dropdown
   const [showAddMenu, setShowAddMenu] = useState(false);
 
@@ -85,7 +89,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
   const [newConnection, setNewConnection] = useState<Partial<Connection> & { tagsString: string }>({
     name: '', nickname: '', role: '', phone: '', birthday: '', location: '', tier: RelationshipTier.ACQUAINTANCE, source: 'MANUAL', tagsString: ''
   });
-  const [editingConnection, setEditingConnection] = useState<(Connection & { tagsString: string }) | null>(null);
+  const [editingConnection, setEditingConnection] = useState<(Connection & { tagsString: string; linkUniqueId?: string }) | null>(null);
 
   // --- 1. FETCH DATA ---
   const fetchConnections = async () => {
@@ -98,21 +102,42 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
        
        logDbOperation('Connections', 'Data received', data);
 
-       const formattedData: Connection[] = data.map((item: any) => ({
-          id: item.id,
-          name: item.name,
-          nickname: item.nickname,
-          role: item.role,
-          phone: item.phone,
-          location: item.location,
-          birthday: item.birthday,
-          tier: item.tier,
-          avatar: item.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`,
-          lastInteraction: item.last_interaction_date,
-          source: item.source || 'MANUAL',
-          memoriesCount: 0, // Need join for real count
-          tags: (item.tags || []).filter((t: string) => !isSystemTag(t))
-       }));
+       const formattedData: Connection[] = data.map((item: any) => {
+          // 1. Standard Link
+          let linkedId = item.linked_user_id;
+
+          // 2. Tag Fallback (Legacy)
+          if (!linkedId && item.tags && Array.isArray(item.tags)) {
+              const linkTag = item.tags.find((t: string) => t.startsWith('LINKED_ID:'));
+              if (linkTag) linkedId = linkTag.split(':')[1];
+          }
+
+          // 3. Avatar URL Fallback (Recovery for Orphaned Connections)
+          if (!linkedId && item.avatar_url && item.avatar_url.includes('/avatars/')) {
+              const match = item.avatar_url.match(/\/avatars\/([a-f0-9-]{36})\//);
+              if (match && match[1]) {
+                  linkedId = match[1];
+                  console.warn(`Recovered linked_id for ${item.name} from avatar URL: ${linkedId}`);
+              }
+          }
+
+          return {
+            id: item.id,
+            name: item.name,
+            nickname: item.nickname,
+            role: item.role,
+            phone: item.phone,
+            location: item.location,
+            birthday: item.birthday,
+            tier: item.tier,
+            avatar: item.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random`,
+            lastInteraction: item.last_interaction_date,
+            source: item.source || 'MANUAL',
+            memoriesCount: 0, 
+            tags: (item.tags || []).filter((t: string) => !isSystemTag(t)),
+            linked_user_id: linkedId
+          };
+       });
 
        setConnections(formattedData);
     } catch (err: any) {
@@ -206,14 +231,37 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
 
   // --- 3. EDIT DATA ---
   const startEdit = (conn: Connection) => {
-    setEditingConnection({ ...conn, tagsString: conn.tags ? conn.tags.join(', ') : '' });
+    setEditingConnection({ 
+        ...conn, 
+        tagsString: conn.tags ? conn.tags.join(', ') : '',
+        linkUniqueId: '' // Field for manual linking
+    });
     setIsEditModalOpen(true);
   };
 
   const handleSaveEdit = async () => {
     if (!editingConnection) return;
     try {
-       const payload = {
+       // Check if we need to resolve a linked user ID
+       let resolvedLinkedUserId = null;
+       if (editingConnection.linkUniqueId && editingConnection.linkUniqueId.trim().length === 8) {
+           logDbOperation('Connections', 'Resolving Unique ID...', editingConnection.linkUniqueId);
+           const { data: profile, error: profileError } = await supabase
+               .from('profiles')
+               .select('id, name, avatar_url')
+               .eq('unique_id', editingConnection.linkUniqueId.toUpperCase())
+               .single();
+           
+           if (profileError || !profile) {
+               alert(`Không tìm thấy người dùng với ID: ${editingConnection.linkUniqueId}`);
+               return; // Stop save to allow correction
+           }
+           resolvedLinkedUserId = profile.id;
+           // Optionally update local fields to match profile
+           editingConnection.name = profile.name; 
+       }
+
+       const payload: any = {
           name: editingConnection.name,
           nickname: editingConnection.nickname,
           role: editingConnection.role,
@@ -223,6 +271,11 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
           tier: editingConnection.tier,
           tags: editingConnection.tagsString ? editingConnection.tagsString.split(',').map(t => t.trim()).filter(t => t) : []
        };
+
+       if (resolvedLinkedUserId) {
+           payload.linked_user_id = resolvedLinkedUserId;
+           payload.source = 'APP'; // Switch source to APP
+       }
 
        logDbOperation('Connections', 'Update Request', { id: editingConnection.id, ...payload });
 
@@ -411,9 +464,14 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
     return false;
   });
 
+  // Handle Avatar Click to View Profile
+  const handleAvatarClick = (conn: Connection) => {
+      setViewingProfile(conn);
+  };
+
   // --- Galaxy View Component & Logic ---
   const GalaxyView = ({ data, onEdit }: { data: Connection[], onEdit: (c: Connection) => void }) => {
-     
+     // ... (Galaxy View Logic - No Changes) ...
      // Orbit Configuration: [Tier]: { radius: %, duration: sec, color: string }
      const orbits = {
         5: { radius: 13, duration: 45, color: 'border-pink-500/30 shadow-[0_0_15px_rgba(236,72,153,0.2)]', zIndex: 50 },
@@ -437,7 +495,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
            {/* Deep Space Background */}
            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900/50 via-[#050810] to-black opacity-100"></div>
            
-           {/* Stars (Static for now, could be animated) */}
+           {/* Stars */}
            {Array.from({ length: 50 }).map((_, i) => (
              <div 
                key={i}
@@ -452,7 +510,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
              />
            ))}
 
-           {/* The Earth (You) */}
+           {/* The Earth */}
            <div className="absolute z-[100] group cursor-default">
               <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 via-blue-600 to-emerald-400 shadow-[0_0_30px_rgba(37,99,235,0.6)] flex items-center justify-center border-4 border-white/30 relative">
                  <Globe size={32} className="text-white" strokeWidth={1.5} />
@@ -480,7 +538,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                       zIndex: config.zIndex,
                     }}
                  >
-                    {/* Rotating Ring Container */}
+                    {/* Rotating Ring */}
                     <div 
                       className="absolute w-full h-full animate-spin-slow group-hover/galaxy:paused"
                       style={{ 
@@ -489,7 +547,6 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                     >
                       {connections.map((conn, index) => {
                          const startAngle = index * angleStep;
-                         // Avatar sizes
                          const size = tier === 5 ? 70 : tier === 4 ? 58 : tier === 3 ? 48 : tier === 2 ? 38 : 32;
                          
                          return (
@@ -501,34 +558,40 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                                 transform: `rotate(${startAngle}deg)`,
                               }}
                             >
-                               {/* Planet Wrapper - Positioned at top of spoke (perimeter) */}
+                               {/* Planet Wrapper */}
                                <div 
                                  className="absolute pointer-events-auto cursor-pointer group/planet"
                                  style={{
                                     width: size,
                                     height: size,
-                                    top: -size / 2, // Center on orbit line
-                                    left: -size / 2, // Center on spoke
+                                    top: -size / 2, 
+                                    left: -size / 2,
                                  }}
                                  onClick={() => onEdit(conn)}
                                >
-                                  {/* 1. Counter-rotate STATICALLY to negate startAngle (Upright Orientation Step 1) */}
+                                  {/* Counter-rotate STATICALLY */}
                                   <div 
                                     className="w-full h-full"
                                     style={{ transform: `rotate(-${startAngle}deg)` }}
                                   >
-                                      {/* 2. Counter-rotate ANIMATED to negate orbit rotation (Upright Orientation Step 2) */}
+                                      {/* Counter-rotate ANIMATED */}
                                       <div 
                                         className="w-full h-full relative group-hover/galaxy:paused"
                                         style={{ animation: `counter-orbit ${config.duration}s linear infinite` }}
                                       >
                                           {/* Avatar */}
-                                          <div className={`
+                                          <div 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleAvatarClick(conn);
+                                            }}
+                                            className={`
                                             w-full h-full rounded-full p-[3px] shadow-lg transition-transform duration-300 hover:scale-125 relative
                                             ${tier === 5 ? 'bg-gradient-to-tr from-pink-500 to-rose-500' : 
                                               tier === 4 ? 'bg-gradient-to-tr from-purple-500 to-indigo-500' : 
                                               tier === 3 ? 'bg-gradient-to-tr from-teal-400 to-emerald-500' : 
                                               tier === 2 ? 'bg-slate-400' : 'bg-slate-600'}
+                                            cursor-pointer hover:ring-2 hover:ring-white
                                           `}>
                                               <img 
                                                 src={conn.avatar} 
@@ -536,7 +599,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                                                 className="w-full h-full rounded-full object-cover border-2 border-slate-900 bg-slate-900"
                                               />
                                               
-                                              {/* Label on Hover */}
+                                              {/* Label */}
                                               <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 opacity-0 group-hover/planet:opacity-100 transition-opacity bg-slate-900/90 text-white text-[10px] px-2 py-1 rounded border border-white/10 whitespace-nowrap z-[100] pointer-events-none">
                                                 <p className="font-bold">{conn.name}</p>
                                                 <p className="text-slate-400">{conn.role}</p>
@@ -553,7 +616,7 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
               );
            })}
 
-           {/* CSS Keyframes for Orbit */}
+           {/* CSS Keyframes */}
            <style>{`
              @keyframes orbit {
                from { transform: rotate(0deg); }
@@ -745,12 +808,18 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                   <button className="absolute top-4 right-4 text-slate-300 hover:text-slate-600" onClick={() => startEdit(conn)}>
                      <Edit2 size={16} />
                   </button>
-                  <div className="relative mb-4">
-                     <img src={conn.avatar} className="w-20 h-20 rounded-full object-cover border-4 border-slate-50 shadow-sm" />
+                  <div 
+                    className={`relative mb-4 cursor-pointer`}
+                    onClick={() => handleAvatarClick(conn)}
+                  >
+                     <img src={conn.avatar} className={`w-20 h-20 rounded-full object-cover border-4 shadow-sm ${conn.linked_user_id ? 'border-indigo-100 hover:border-indigo-300 transition-colors' : 'border-slate-50 hover:border-slate-200'}`} />
                      {conn.tier === RelationshipTier.SOULMATE && (
                         <div className="absolute -bottom-1 -right-1 bg-yellow-400 p-1 rounded-full border-2 border-white">
                            <Star size={10} className="text-white fill-white" />
                         </div>
+                     )}
+                     {conn.linked_user_id && (
+                         <div className="absolute top-0 right-0 bg-indigo-500 w-4 h-4 rounded-full border-2 border-white" title="Connected Profile"></div>
                      )}
                   </div>
                   <h3 className="font-bold text-slate-900 text-lg">
@@ -823,9 +892,15 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
                         <tr key={conn.id} className="bg-white border-b border-slate-100 hover:bg-slate-50 transition-colors group">
                            <td className="px-6 py-4">
                               <div className="flex items-center gap-3">
-                                 <img src={conn.avatar} className="w-10 h-10 rounded-full object-cover" />
+                                 <div className="relative cursor-pointer" onClick={() => handleAvatarClick(conn)}>
+                                     <img src={conn.avatar} className="w-10 h-10 rounded-full object-cover" />
+                                     {conn.linked_user_id && <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full border border-white"></div>}
+                                 </div>
                                  <div>
-                                    <div className="font-semibold text-slate-900">
+                                    <div 
+                                        className={`font-semibold cursor-pointer hover:underline text-slate-900`}
+                                        onClick={() => handleAvatarClick(conn)}
+                                    >
                                        {conn.name} 
                                        {conn.nickname && <span className="text-slate-500 font-normal ml-1">({conn.nickname})</span>}
                                     </div>
@@ -989,6 +1064,28 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
       <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="Chỉnh Sửa Kết Nối">
         {editingConnection && (
           <div className="space-y-4">
+             {/* Link Profile Section */}
+             <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-4">
+                 <label className="text-xs font-bold text-indigo-700 uppercase mb-1 flex items-center gap-2">
+                     <LinkIcon size={12} /> Liên kết Hồ sơ (Tùy chọn)
+                 </label>
+                 <p className="text-[10px] text-indigo-600/70 mb-2">Nhập ID Kết nối của người dùng để xem thông tin chi tiết của họ.</p>
+                 <div className="flex gap-2">
+                     <Input 
+                        value={editingConnection.linkUniqueId || ''}
+                        onChange={(e) => setEditingConnection({...editingConnection, linkUniqueId: e.target.value.toUpperCase()})}
+                        placeholder="VD: 2WQP7GY3"
+                        className="bg-white"
+                        maxLength={8}
+                     />
+                 </div>
+                 {(editingConnection as Connection).linked_user_id && (
+                     <div className="mt-2 flex items-center gap-1 text-xs text-green-600 font-bold">
+                         <Check size={12} /> Đã liên kết
+                     </div>
+                 )}
+             </div>
+
              <div className="grid grid-cols-2 gap-4">
                 <div>
                    <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Họ và tên</label>
@@ -1211,6 +1308,14 @@ const Connections: React.FC<ConnectionsProps> = ({ lang }) => {
               </div>
           </div>
       </Modal>
+
+      {/* NEW: VIEW USER PROFILE MODAL */}
+      <UserProfileModal 
+          isOpen={!!viewingProfile} 
+          onClose={() => setViewingProfile(null)} 
+          connection={viewingProfile}
+          onUpdate={fetchConnections} // Callback to refresh list after linking
+      />
 
     </div>
   );

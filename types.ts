@@ -50,6 +50,7 @@ export interface Connection {
   role?: string;
   phone?: string;
   location?: string;
+  linked_user_id?: string; // Added linked_user_id
 }
 
 export interface Memory {

@@ -163,7 +163,15 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
     securityCode: "",
     
     // New Detailed Info JSONB
-    detailedInfo: {} as DetailedInfo
+    detailedInfo: {} as DetailedInfo,
+    
+    // Detailed Section Privacy
+    detailedPrivacy: {
+        education: 'FRIENDS' as PrivacyLevel,
+        work: 'PUBLIC' as PrivacyLevel,
+        living: 'CLOSE_FRIENDS' as PrivacyLevel,
+        activities: 'FRIENDS' as PrivacyLevel
+    }
   });
 
   const [editSecurityCode, setEditSecurityCode] = useState("");
@@ -232,7 +240,13 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
                         tags: data.tags && data.tags.length > 0 ? data.tags : ['MEMBER'],
                         uniqueId: currentUniqueId,
                         securityCode: data.security_code || "",
-                        detailedInfo: details
+                        detailedInfo: details,
+                        detailedPrivacy: {
+                            education: ps.detailed_education || 'FRIENDS',
+                            work: ps.detailed_work || 'PUBLIC',
+                            living: ps.detailed_living || 'CLOSE_FRIENDS',
+                            activities: ps.detailed_activities || 'FRIENDS'
+                        }
                     }));
                     setEditSecurityCode(data.security_code || "");
                 } else {
@@ -276,7 +290,13 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
               job: userInfo.job.privacy,
               education: userInfo.education.privacy,
               skills: userInfo.skills.privacy,
-              hobbies: userInfo.hobbies.privacy
+              hobbies: userInfo.hobbies.privacy,
+              
+              // NEW: Section Privacy
+              detailed_education: userInfo.detailedPrivacy.education,
+              detailed_work: userInfo.detailedPrivacy.work,
+              detailed_living: userInfo.detailedPrivacy.living,
+              detailed_activities: userInfo.detailedPrivacy.activities
           };
 
           const updates = {
@@ -321,6 +341,16 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
       ...prev,
       [field]: { ...prev[field as keyof typeof prev] as UserField, privacy: level }
     }));
+  };
+  
+  const handleDetailPrivacyChange = (section: keyof typeof userInfo.detailedPrivacy, level: PrivacyLevel) => {
+      setUserInfo(prev => ({
+          ...prev,
+          detailedPrivacy: {
+              ...prev.detailedPrivacy,
+              [section]: level
+          }
+      }));
   };
 
   // Helper for Detailed Info Update (Generic)
@@ -546,9 +576,29 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
             
             {/* 1. Education Group */}
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-                    <GraduationCap className="text-indigo-600" size={18} />
-                    <h4 className="font-bold text-slate-800 text-sm">Học Vấn & Trường Lớp</h4>
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <GraduationCap className="text-indigo-600" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Học Vấn & Trường Lớp</h4>
+                    </div>
+                    {/* Education Privacy Selector */}
+                    {isEditing ? (
+                        <select 
+                            value={userInfo.detailedPrivacy.education}
+                            onChange={(e) => handleDetailPrivacyChange('education', e.target.value as PrivacyLevel)}
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-primary-500"
+                        >
+                            <option value="PUBLIC">Public</option>
+                            <option value="FRIENDS">Friends</option>
+                            <option value="CLOSE_FRIENDS">Close Friends</option>
+                            <option value="PRIVATE">Only Me</option>
+                        </select>
+                    ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-white px-2 py-1 rounded">
+                            {getPrivacyIcon(userInfo.detailedPrivacy.education)}
+                            <span>{getPrivacyLabel(userInfo.detailedPrivacy.education)}</span>
+                        </div>
+                    )}
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="md:col-span-2">
@@ -597,9 +647,29 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
 
             {/* 2. Work Group */}
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-                    <Briefcase className="text-blue-600" size={18} />
-                    <h4 className="font-bold text-slate-800 text-sm">Công Việc & Tổ Chức</h4>
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Briefcase className="text-blue-600" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Công Việc & Tổ Chức</h4>
+                    </div>
+                    {/* Work Privacy Selector */}
+                    {isEditing ? (
+                        <select 
+                            value={userInfo.detailedPrivacy.work}
+                            onChange={(e) => handleDetailPrivacyChange('work', e.target.value as PrivacyLevel)}
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-primary-500"
+                        >
+                            <option value="PUBLIC">Public</option>
+                            <option value="FRIENDS">Friends</option>
+                            <option value="CLOSE_FRIENDS">Close Friends</option>
+                            <option value="PRIVATE">Only Me</option>
+                        </select>
+                    ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-white px-2 py-1 rounded">
+                            {getPrivacyIcon(userInfo.detailedPrivacy.work)}
+                            <span>{getPrivacyLabel(userInfo.detailedPrivacy.work)}</span>
+                        </div>
+                    )}
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     {isEditing ? (
@@ -624,9 +694,29 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
 
             {/* 3. Living Group */}
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-                    <Home className="text-orange-500" size={18} />
-                    <h4 className="font-bold text-slate-800 text-sm">Nơi Ở & Quê Quán</h4>
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Home className="text-orange-500" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Nơi Ở & Quê Quán</h4>
+                    </div>
+                    {/* Living Privacy Selector */}
+                    {isEditing ? (
+                        <select 
+                            value={userInfo.detailedPrivacy.living}
+                            onChange={(e) => handleDetailPrivacyChange('living', e.target.value as PrivacyLevel)}
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-primary-500"
+                        >
+                            <option value="PUBLIC">Public</option>
+                            <option value="FRIENDS">Friends</option>
+                            <option value="CLOSE_FRIENDS">Close Friends</option>
+                            <option value="PRIVATE">Only Me</option>
+                        </select>
+                    ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-white px-2 py-1 rounded">
+                            {getPrivacyIcon(userInfo.detailedPrivacy.living)}
+                            <span>{getPrivacyLabel(userInfo.detailedPrivacy.living)}</span>
+                        </div>
+                    )}
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     {isEditing ? (
@@ -649,9 +739,29 @@ const Profile: React.FC<ProfileProps> = ({ lang }) => {
 
                 {/* 4. Activities Group */}
                 <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-                    <Gamepad2 className="text-purple-500" size={18} />
-                    <h4 className="font-bold text-slate-800 text-sm">Sở Thích & Cộng Đồng</h4>
+                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Gamepad2 className="text-purple-500" size={18} />
+                        <h4 className="font-bold text-slate-800 text-sm">Sở Thích & Cộng Đồng</h4>
+                    </div>
+                    {/* Activities Privacy Selector */}
+                    {isEditing ? (
+                        <select 
+                            value={userInfo.detailedPrivacy.activities}
+                            onChange={(e) => handleDetailPrivacyChange('activities', e.target.value as PrivacyLevel)}
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:border-primary-500"
+                        >
+                            <option value="PUBLIC">Public</option>
+                            <option value="FRIENDS">Friends</option>
+                            <option value="CLOSE_FRIENDS">Close Friends</option>
+                            <option value="PRIVATE">Only Me</option>
+                        </select>
+                    ) : (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-white px-2 py-1 rounded">
+                            {getPrivacyIcon(userInfo.detailedPrivacy.activities)}
+                            <span>{getPrivacyLabel(userInfo.detailedPrivacy.activities)}</span>
+                        </div>
+                    )}
                 </div>
                 <div className="p-4 grid grid-cols-1 gap-4">
                     {isEditing ? (

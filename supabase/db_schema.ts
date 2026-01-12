@@ -97,7 +97,40 @@ create policy "Users can update their own profile"
   on profiles for update using (auth.uid() = id);
 
 
--- SECURE VIEW FUNCTION (Optional, for stricter partial data access)
+-- 3. CONNECTIONS TABLE
+create table if not exists public.connections (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  name text not null,
+  nickname text,
+  role text,
+  avatar_url text,
+  tier int default 1 check (tier between 1 and 5),
+  tags text[],
+  phone text,
+  location text,
+  birthday text,
+  last_interaction_date date default CURRENT_DATE,
+  source text default 'MANUAL',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Idempotent Column Addition for Connections
+do $$ 
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'connections' and column_name = 'linked_user_id') then
+    alter table public.connections add column linked_user_id uuid references public.profiles(id) on delete set null;
+  end if;
+end $$;
+
+alter table public.connections enable row level security;
+
+drop policy if exists "Users can CRUD their own connections" on connections;
+create policy "Users can CRUD their own connections" 
+  on connections for all using (auth.uid() = user_id);
+
+
+-- SECURE VIEW FUNCTION (UPDATED)
 create or replace function public.get_profile_view(target_id uuid)
 returns jsonb
 language plpgsql
@@ -110,6 +143,11 @@ declare
   privacy_settings jsonb;
   result jsonb;
   setting text;
+  relation_tier int := 0;
+  
+  -- Vars for Detailed Info Construction
+  d_info jsonb;
+  out_details jsonb := '{}'::jsonb;
 begin
   -- 1. Fetch Target Profile
   select * into target_profile from profiles where id = target_id;
@@ -123,47 +161,133 @@ begin
     return to_jsonb(target_profile);
   end if;
 
-  privacy_settings := coalesce(target_profile.privacy_settings, '{}'::jsonb);
+  -- 3. Determine Relationship Tier
+  -- Check if there is a connection from viewer to target
+  select tier into relation_tier from connections 
+  where user_id = viewer_id and linked_user_id = target_id
+  limit 1;
 
-  -- 3. Construct Public Base Object (Always Visible)
+  if not found then
+    relation_tier := 0; -- Stranger
+  end if;
+
+  privacy_settings := coalesce(target_profile.privacy_settings, '{}'::jsonb);
+  d_info := coalesce(target_profile.detailed_info, '{}'::jsonb);
+
+  -- 4. Construct Public Base Object (Always Visible)
+  -- 'bio' is explicitly PUBLIC per requirement "Thông Tin Chi Tiết (Cho Tìm Kiếm) luôn là Public"
   result := jsonb_build_object(
     'id', target_profile.id,
     'name', target_profile.name,
     'avatar_url', target_profile.avatar_url,
     'role', target_profile.role,
-    'bio', target_profile.bio -- Bio assumed public
+    'bio', target_profile.bio, 
+    'unique_id', target_profile.unique_id,
+    'cover_url', target_profile.cover_url
   );
 
-  -- 4. Conditionally Add Fields based on Settings
+  -- Helper logic for visibility
+  -- PUBLIC: Always
+  -- FRIENDS: Tier >= 1
+  -- CLOSE_FRIENDS: Tier >= 3
+  -- PRIVATE: Never (except owner)
+
+  -- --- BASIC INFO SECTIONS ---
+
+  -- Email
   setting := coalesce(privacy_settings->>'email', 'PRIVATE');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('email', target_profile.email);
   end if;
 
+  -- Job (Basic)
   setting := coalesce(privacy_settings->>'job', 'PUBLIC');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('job', target_profile.job);
   end if;
 
+  -- Education (Basic - e.g. "Harvard University")
   setting := coalesce(privacy_settings->>'education', 'FRIENDS');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('education', target_profile.education);
   end if;
 
+  -- Skills
   setting := coalesce(privacy_settings->>'skills', 'PUBLIC');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('skills', target_profile.skills);
   end if;
 
+  -- Hobbies
   setting := coalesce(privacy_settings->>'hobbies', 'FRIENDS');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('hobbies', target_profile.hobbies);
   end if;
 
+  -- Address / Location
   setting := coalesce(privacy_settings->>'address', 'CLOSE_FRIENDS');
-  if setting = 'PUBLIC' then
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
     result := result || jsonb_build_object('location', target_profile.location);
   end if;
+
+  -- Birthday
+  -- Assuming default PRIVATE/CLOSE_FRIENDS for birthday if not set
+  -- Let's stick to 'FRIENDS' default for Birthday
+  if relation_tier >= 1 then
+     result := result || jsonb_build_object('birthday', target_profile.birthday);
+  end if;
+
+  -- --- DETAILED INFO SECTIONS ---
+
+  -- 1. Detailed Education
+  setting := coalesce(privacy_settings->>'detailed_education', 'FRIENDS');
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
+     out_details := out_details || jsonb_build_object(
+        'preschool', d_info->'preschool',
+        'primarySchool', d_info->'primarySchool',
+        'secondarySchool', d_info->'secondarySchool',
+        'highSchool', d_info->'highSchool',
+        'university', d_info->'university',
+        'highSchoolStream', d_info->'highSchoolStream',
+        'major', d_info->'major'
+     );
+  end if;
+
+  -- 2. Detailed Work
+  setting := coalesce(privacy_settings->>'detailed_work', 'PUBLIC');
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
+     out_details := out_details || jsonb_build_object(
+        'company', d_info->'company',
+        'organization', d_info->'organization',
+        'officeBranch', d_info->'officeBranch',
+        'partTimeJob', d_info->'partTimeJob',
+        'internship', d_info->'internship'
+     );
+  end if;
+
+  -- 3. Detailed Living
+  setting := coalesce(privacy_settings->>'detailed_living', 'CLOSE_FRIENDS');
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
+     out_details := out_details || jsonb_build_object(
+        'hometown', d_info->'hometown',
+        'neighborhood', d_info->'neighborhood',
+        'dorm', d_info->'dorm',
+        'apartment', d_info->'apartment',
+        'rentalHouse', d_info->'rentalHouse'
+     );
+  end if;
+
+  -- 4. Detailed Activities
+  setting := coalesce(privacy_settings->>'detailed_activities', 'FRIENDS');
+  if setting = 'PUBLIC' or (setting = 'FRIENDS' and relation_tier >= 1) or (setting = 'CLOSE_FRIENDS' and relation_tier >= 3) then
+     out_details := out_details || jsonb_build_object(
+        'clubs', d_info->'clubs',
+        'games', d_info->'games'
+     );
+  end if;
+
+  -- Attach filtered Detailed Info
+  result := result || jsonb_build_object('detailed_info', out_details);
 
   return result;
 end;
@@ -190,31 +314,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
-
-
--- 3. CONNECTIONS TABLE
-create table if not exists public.connections (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references public.profiles(id) on delete cascade not null,
-  name text not null,
-  nickname text,
-  role text,
-  avatar_url text,
-  tier int default 1 check (tier between 1 and 5),
-  tags text[],
-  phone text,
-  location text,
-  birthday text,
-  last_interaction_date date default CURRENT_DATE,
-  source text default 'MANUAL',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
-alter table public.connections enable row level security;
-
-drop policy if exists "Users can CRUD their own connections" on connections;
-create policy "Users can CRUD their own connections" 
-  on connections for all using (auth.uid() = user_id);
 
 
 -- 4. MEMORIES TABLE
@@ -355,7 +454,7 @@ drop policy if exists "Authenticated users can insert notifications" on notifica
 create policy "Authenticated users can insert notifications" 
   on notifications for insert with check (auth.role() = 'authenticated');
 
--- 10. RPC: CONNECT BY CODE
+-- 10. RPC: CONNECT BY CODE (UPDATED)
 create or replace function public.connect_by_code(
     target_unique_id text,
     provided_code text
@@ -397,7 +496,7 @@ begin
         -- A. Auto Connect (Mutual)
         
         -- Insert for Sender (You)
-        insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+        insert into connections (user_id, name, role, avatar_url, tier, source, tags, linked_user_id)
         values (
             sender_id,
             target_profile.name,
@@ -405,11 +504,12 @@ begin
             target_profile.avatar_url,
             1, -- Tier 1
             'APP',
-            ARRAY[]::text[]
+            ARRAY[]::text[],
+            target_profile.id -- LINKED
         );
 
         -- Insert for Target (Them)
-        insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+        insert into connections (user_id, name, role, avatar_url, tier, source, tags, linked_user_id)
         values (
             target_profile.id,
             sender_profile.name,
@@ -417,7 +517,8 @@ begin
             sender_profile.avatar_url,
             1, -- Tier 1
             'APP',
-            ARRAY[]::text[]
+            ARRAY[]::text[],
+            sender_id -- LINKED
         );
 
         -- Notify Target
@@ -450,7 +551,7 @@ begin
 end;
 $$;
 
--- 11. RPC: ACCEPT FRIEND REQUEST
+-- 11. RPC: ACCEPT FRIEND REQUEST (UPDATED)
 create or replace function public.accept_friend_request(
     notification_id uuid
 )
@@ -485,7 +586,7 @@ begin
     -- 2. Create Mutual Connections
     
     -- Insert for Receiver (Me) - adding Sender
-    insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+    insert into connections (user_id, name, role, avatar_url, tier, source, tags, linked_user_id)
     values (
         receiver_id,
         sender_profile.name,
@@ -493,11 +594,12 @@ begin
         sender_profile.avatar_url,
         1, -- Tier 1
         'APP',
-        ARRAY[]::text[]
+        ARRAY[]::text[],
+        sender_id -- LINKED
     );
 
     -- Insert for Sender (Them) - adding Me
-    insert into connections (user_id, name, role, avatar_url, tier, source, tags)
+    insert into connections (user_id, name, role, avatar_url, tier, source, tags, linked_user_id)
     values (
         sender_id,
         receiver_profile.name,
@@ -505,7 +607,8 @@ begin
         receiver_profile.avatar_url,
         1, -- Tier 1
         'APP',
-        ARRAY[]::text[]
+        ARRAY[]::text[],
+        receiver_id -- LINKED
     );
 
     -- 3. Update Notification Status

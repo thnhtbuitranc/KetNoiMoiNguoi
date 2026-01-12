@@ -4,6 +4,7 @@ import { Sparkles, Calendar, Clock, Activity, Shield, ChevronRight, Heart, Cake,
 import { Language } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { supabase, logDbOperation } from '../services/supabase';
+import UserProfileModal from '../components/UserProfileModal';
 
 interface DashboardProps {
   lang: Language;
@@ -27,6 +28,9 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
+
+  // View Profile State
+  const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
 
   // Helper to normalize strings for comparison (remove accents, lowercase)
   const normalize = (str: string) => {
@@ -382,10 +386,14 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
               
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {suggestions.map(person => (
-                      <Card key={person.id} className="p-4 flex gap-4 items-center">
-                          <img src={person.avatar} className="w-14 h-14 rounded-full object-cover border border-slate-100" />
+                      <Card 
+                        key={person.id} 
+                        className="p-4 flex gap-4 items-center hover:bg-slate-50 transition-colors cursor-pointer group"
+                        onClick={() => setViewingProfileId(person.id)} // View Profile on Click
+                      >
+                          <img src={person.avatar} className="w-14 h-14 rounded-full object-cover border border-slate-100 group-hover:scale-105 transition-transform" />
                           <div className="flex-1 min-w-0">
-                              <h4 className="font-bold text-slate-900 text-sm">{person.name}</h4>
+                              <h4 className="font-bold text-slate-900 text-sm group-hover:text-primary-600 transition-colors">{person.name}</h4>
                               <div className="mt-1 space-y-0.5">
                                   {person.reasons.map((reason, idx) => (
                                       <p key={idx} className="text-[10px] text-slate-500 truncate flex items-center gap-1">
@@ -400,7 +408,12 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                                       <CheckCircle size={16} />
                                   </Button>
                               ) : (
-                                  <Button size="sm" className="px-3" onClick={() => handleSendRequest(person.id, person.name)} title="Gửi lời mời kết bạn">
+                                  <Button 
+                                    size="sm" 
+                                    className="px-3" 
+                                    onClick={(e) => { e.stopPropagation(); handleSendRequest(person.id, person.name); }} 
+                                    title="Gửi lời mời kết bạn"
+                                  >
                                       <UserPlus size={16} />
                                   </Button>
                               )}
@@ -410,6 +423,13 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
               </div>
           </div>
       )}
+
+      {/* Profile Viewer Modal */}
+      <UserProfileModal 
+        isOpen={!!viewingProfileId} 
+        onClose={() => setViewingProfileId(null)}
+        userId={viewingProfileId}
+      />
 
     </div>
   );
