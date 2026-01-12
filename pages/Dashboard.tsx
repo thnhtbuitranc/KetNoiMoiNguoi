@@ -16,6 +16,12 @@ interface Suggestion {
     avatar: string;
     score: number;
     reasons: string[];
+    // Extended fields for better preview
+    role?: string;
+    location?: string;
+    bio?: string;
+    cover_url?: string;
+    birthday?: string;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
@@ -31,10 +37,10 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
   // View Profile State
   const [viewingProfileId, setViewingProfileId] = useState<string | null>(null);
 
-  // Helper to normalize strings for comparison (remove accents, lowercase)
+  // Helper to normalize strings for comparison (remove accents, lowercase, remove ALL spaces)
   const normalize = (str: string) => {
       if (!str) return "";
-      return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+      return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, ""); 
   };
 
   // Fetch Dashboard Data
@@ -46,8 +52,8 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         if (!user) return;
 
         // 1. Fetch Stats (Tier Distribution) & Connected IDs & Names
-        // Added 'name' to selection to filter by name as well
-        const { data: connData, error: connError } = await supabase.from('connections').select('tier, tags, linked_user_id, name');
+        // Added 'nickname' to selection for better filtering
+        const { data: connData, error: connError } = await supabase.from('connections').select('tier, tags, linked_user_id, name, nickname');
         let connectedIds: string[] = []; // Track who is already connected by ID
         let connectedNames: string[] = []; // Track who is connected by Name
 
@@ -62,9 +68,13 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                    connectedIds.push(c.linked_user_id);
                }
 
-               // Add Name to exclusion list (to handle duplicate profiles or unlinked duplicates)
+               // Add Name to exclusion list
                if (c.name) {
                    connectedNames.push(normalize(c.name));
+               }
+               // Add Nickname to exclusion list
+               if (c.nickname) {
+                   connectedNames.push(normalize(c.nickname));
                }
 
                // Extract legacy linked IDs from tags
@@ -131,10 +141,10 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
           const myLocation = myProfile?.location || "";
 
           // B. Get Candidates (Limit 50 to avoid heavy load)
-          // Exclude self. We will filter connectedIds in JS.
+          // Fetch extra fields for better preview (role, cover_url, bio, birthday)
           const { data: candidates } = await supabase
             .from('profiles')
-            .select('id, name, avatar_url, detailed_info, location')
+            .select('id, name, avatar_url, detailed_info, location, role, bio, cover_url, birthday')
             .neq('id', myId)
             .limit(50);
 
@@ -210,13 +220,21 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                   reasons.push(`Cùng sống tại: ${candidate.location}`);
               }
 
+              // Include high scoring or just show some randoms if empty? 
+              // For now keep threshold >= 2, but could lower to 1 for more results
               if (score >= 2) {
                   results.push({
                       id: candidate.id,
                       name: candidate.name,
                       avatar: candidate.avatar_url,
                       score: score,
-                      reasons: reasons.slice(0, 3) // Top 3 reasons
+                      reasons: reasons.slice(0, 3), // Top 3 reasons
+                      // Extra fields
+                      role: candidate.role,
+                      location: candidate.location,
+                      bio: candidate.bio,
+                      cover_url: candidate.cover_url,
+                      birthday: candidate.birthday
                   });
               }
           });
@@ -404,6 +422,7 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
                         key={person.id} 
                         className="p-4 flex gap-4 items-center hover:bg-slate-50 transition-colors cursor-pointer group"
                         onClick={() => setViewingProfileId(person.id)} // View Profile on Click
+                        title="Xem trang cá nhân"
                       >
                           <img src={person.avatar} className="w-14 h-14 rounded-full object-cover border border-slate-100 group-hover:scale-105 transition-transform" />
                           <div className="flex-1 min-w-0">
@@ -437,6 +456,8 @@ const Dashboard: React.FC<DashboardProps> = ({ lang }) => {
         isOpen={!!viewingProfileId} 
         onClose={() => setViewingProfileId(null)}
         userId={viewingProfileId}
+        // Pass a richer object to help modal display data while fetching
+        connection={suggestions.find(s => s.id === viewingProfileId) as any}
       />
 
     </div>

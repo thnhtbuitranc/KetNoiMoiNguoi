@@ -41,9 +41,16 @@ export const Button: React.FC<ButtonProps> = ({
   );
 };
 
-export const Card: React.FC<{ children: React.ReactNode; className?: string; hover?: boolean }> = ({ children, className = '', hover = false }) => {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  hover?: boolean;
+}
+
+export const Card: React.FC<CardProps> = ({ children, className = '', hover = false, ...props }) => {
   return (
-    <div className={`bg-white rounded-2xl border border-slate-200/60 shadow-card ${hover ? 'hover:shadow-lg hover:-translate-y-1 transition-all duration-300' : ''} ${className}`}>
+    <div 
+      className={`bg-white rounded-2xl border border-slate-200/60 shadow-card ${hover ? 'hover:shadow-lg hover:-translate-y-1 transition-all duration-300' : ''} ${className}`}
+      {...props}
+    >
       {children}
     </div>
   );

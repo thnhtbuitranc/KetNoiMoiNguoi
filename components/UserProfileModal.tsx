@@ -475,18 +475,38 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onClose, co
                                 </div>
                             </div>
 
-                            {/* Living & Work */}
+                            {/* Work & Organization - NEW SECTION */}
+                            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
+                                <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+                                    <Briefcase className="text-blue-600" size={16} />
+                                    <h4 className="font-bold text-slate-800 text-xs uppercase">Công Việc & Tổ Chức</h4>
+                                </div>
+                                <div className="p-4 grid grid-cols-1 gap-2 text-sm">
+                                    {detailedInfo.company && <div><span className="font-semibold text-slate-700">Công ty:</span> {detailedInfo.company}</div>}
+                                    {detailedInfo.officeBranch && <div><span className="font-semibold text-slate-700">Chi nhánh:</span> {detailedInfo.officeBranch}</div>}
+                                    {detailedInfo.organization && <div><span className="font-semibold text-slate-700">Tổ chức:</span> {detailedInfo.organization}</div>}
+                                    {detailedInfo.partTimeJob && <div><span className="font-semibold text-slate-700">Làm thêm:</span> {detailedInfo.partTimeJob}</div>}
+                                    {detailedInfo.internship && <div><span className="font-semibold text-slate-700">Thực tập:</span> {detailedInfo.internship}</div>}
+                                    
+                                    {!detailedInfo.company && !detailedInfo.officeBranch && !detailedInfo.organization && !detailedInfo.partTimeJob && !detailedInfo.internship && (
+                                        <p className="text-xs text-slate-400 italic text-center">Chưa cập nhật thông tin.</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Living & Hometown - SEPARATED */}
                             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
                                 <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
                                     <Home className="text-orange-500" size={16} />
-                                    <h4 className="font-bold text-slate-800 text-xs uppercase">Đời sống</h4>
+                                    <h4 className="font-bold text-slate-800 text-xs uppercase">Nơi Ở & Quê Quán</h4>
                                 </div>
                                 <div className="p-4 grid grid-cols-1 gap-2 text-sm">
                                     {detailedInfo.hometown && <div><span className="font-semibold text-slate-700">Quê quán:</span> {detailedInfo.hometown}</div>}
-                                    {detailedInfo.neighborhood && <div><span className="font-semibold text-slate-700">Khu vực sống:</span> {detailedInfo.neighborhood}</div>}
-                                    {detailedInfo.company && <div><span className="font-semibold text-slate-700">Công ty:</span> {detailedInfo.company}</div>}
+                                    {detailedInfo.neighborhood && <div><span className="font-semibold text-slate-700">Khu vực:</span> {detailedInfo.neighborhood}</div>}
+                                    {detailedInfo.apartment && <div><span className="font-semibold text-slate-700">Chung cư:</span> {detailedInfo.apartment}</div>}
+                                    {detailedInfo.dorm && <div><span className="font-semibold text-slate-700">KTX/Trọ:</span> {detailedInfo.dorm}</div>}
                                     
-                                    {!detailedInfo.hometown && !detailedInfo.neighborhood && !detailedInfo.company && (
+                                    {!detailedInfo.hometown && !detailedInfo.neighborhood && !detailedInfo.apartment && !detailedInfo.dorm && (
                                         <p className="text-xs text-slate-400 italic text-center">Chưa cập nhật thông tin.</p>
                                     )}
                                 </div>
